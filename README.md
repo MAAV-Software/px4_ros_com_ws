@@ -7,8 +7,7 @@ get a single default drone flying in simulation and to see it talking to
 ROS 2, using nothing but manual terminal commands.
 
 Prior project work (multi-vehicle offboard control packages, the web ground
-station, old build artifacts) has been moved to [archive/](archive/) for
-reference and is not part of this starter state.
+station, old build artifacts) is not part of this starter state.
 
 ## Prerequisites
 
@@ -63,5 +62,4 @@ list | grep fmu` will show the current one.)
 
 That's the whole starter loop: one drone, one manual takeoff, ROS 2 topics
 visible. Everything else (offboard control nodes, waypoint missions, the
-web ground station, multi-drone swarms) is deliberately not here — see
-[archive/](archive/) when you're ready to build on top of this.
+web ground station, multi-drone swarms) is deliberately not here.
