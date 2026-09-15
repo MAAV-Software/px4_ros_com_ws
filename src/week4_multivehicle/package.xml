@@ -1,0 +1,21 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>week4_multivehicle</name>
+  <version>0.0.1</version>
+  <description>Week 4 onboarding exercise: target one vehicle instance in a multi-SITL setup by topic namespace</description>
+  <maintainer email="theamitsail@gmail.com">Amit Sail</maintainer>
+  <license>BSD-3</license>
+
+  <depend>px4_msgs</depend>
+  <depend>rclpy</depend>
+  <exec_depend>ros2launch</exec_depend>
+  <test_depend>ament_copyright</test_depend>
+  <test_depend>ament_flake8</test_depend>
+  <test_depend>ament_pep257</test_depend>
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>
