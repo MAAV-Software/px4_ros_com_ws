@@ -48,12 +48,12 @@ No code yet. Everything below uses plain `ros2 topic` commands across a few term
 
 ### Part B: Automated — the `week1_talker_listener` package
 
-7. Build the `week1_talker_listener` package (lives in [`src/week1_talker_listener`](../src/week1_talker_listener), alongside the rest of the workspace's code) and source the install:
+7. Build the `week1_talker_listener` package (lives in [`src/week1_talker_listener`](.), alongside the rest of the workspace's code) and source the install:
    ```
    colcon build --packages-select week1_talker_listener
    source install/setup.bash
    ```
-8. Read [`talker.py`](../src/week1_talker_listener/week1_talker_listener/talker.py) and [`listener.py`](../src/week1_talker_listener/week1_talker_listener/listener.py). Compare them to what you just did by hand in Part A: `talker.py` is basically `ros2 topic pub` wrapped in a program that runs on a timer instead of a one-off terminal command, and `listener.py` is doing what `ros2 topic echo` does, but inside your own code where you can react to each message.
+8. Read [`talker.py`](week1_talker_listener/talker.py) and [`listener.py`](week1_talker_listener/listener.py). Compare them to what you just did by hand in Part A: `talker.py` is basically `ros2 topic pub` wrapped in a program that runs on a timer instead of a one-off terminal command, and `listener.py` is doing what `ros2 topic echo` does, but inside your own code where you can react to each message.
 9. Run them together:
    ```
    ros2 launch week1_talker_listener talker_listener.launch.py
