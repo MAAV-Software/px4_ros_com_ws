@@ -1,4 +1,0 @@
-[console_scripts]
-listener = week1_talker_listener.listener:main
-talker = week1_talker_listener.talker:main
-
