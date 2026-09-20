@@ -15,7 +15,7 @@
 
 1. Build and launch PX4 SITL with Gazebo; get a drone airborne manually via QGroundControl.
 2. Start the uXRCE-DDS agent and confirm PX4 topics (e.g. vehicle status, position) appear under `ros2 topic list`.
-3. Subscribe to a PX4 topic (e.g. `/fmu/out/vehicle_local_position`) from a ROS2 node and print incoming data.
+3. Subscribe to a PX4 topic (e.g. `/fmu/out/vehicle_local_position_v1`) from a ROS2 node and print incoming data.
 4. Walk through this workspace's directory layout with a returning member; identify where `px4_msgs` message definitions live.
 
 ## Instructions
@@ -48,9 +48,9 @@ MicroXRCEAgent udp4 -p 8888
 This bridges PX4's internal uORB topics to ROS2 over DDS. With it running, confirm in a fourth terminal:
 ```
 ros2 topic list | grep fmu
-ros2 topic echo /fmu/out/vehicle_local_position
+ros2 topic echo /fmu/out/vehicle_local_position_v1
 ```
-You should see a stream of `/fmu/...` topics, and `vehicle_local_position` messages arriving as the simulated drone sits/flies.
+You should see a stream of `/fmu/...` topics, and `vehicle_local_position_v1` messages arriving as the simulated drone sits/flies. (The `_v1` suffix is PX4 republishing this message under a versioned topic name via its `translation_node`, rather than the bare `/fmu/out/vehicle_local_position` — check `ros2 topic list | grep vehicle_local_position` if this ever stops matching after a PX4 update.)
 
 **Automated**: once you've done tasks 1 and 2 by hand and understand what each process is doing, use the provided launch file to start both PX4 SITL and the agent together, each in its own terminal (same terminal-launch pattern as week 1 and the archive's `px4_sitl_with_model.launch.py`):
 ```
@@ -61,7 +61,7 @@ ros2 launch week2_px4_sitl px4_sitl.launch.py
 
 ### Task 3 — Subscribe to a PX4 topic from a ROS2 node
 
-**By hand** (recap from task 2): `ros2 topic echo /fmu/out/vehicle_local_position` already shows you the raw data from the CLI.
+**By hand** (recap from task 2): `ros2 topic echo /fmu/out/vehicle_local_position_v1` already shows you the raw data from the CLI.
 
 Now do the same thing from code. Read [`listener.py`](week2_px4_sitl/listener.py) — note the QoS profile (`BEST_EFFORT` reliability, `TRANSIENT_LOCAL` durability): PX4 publishes with this QoS over the DDS bridge, and a subscriber using ROS2's default QoS will silently receive nothing, which is a common first stumbling block. Then run it:
 ```

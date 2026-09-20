@@ -48,6 +48,8 @@ ros2 launch week3_offboard_control offboard_stub.launch.py
 ```
 Watch the PX4 console (from the SITL terminal) and/or QGroundControl to confirm it arms and climbs.
 
+Note: `offboard_control_stub.py` subscribes to `/fmu/out/vehicle_status_v1` and `/fmu/out/vehicle_local_position_v1` rather than the bare topic names — this PX4 build republishes those messages under versioned topic names via its `translation_node` (see week 2, task 2). If the drone never arms/climbs and you see a `[RTPS_READER_HISTORY Error] Change payload size ... cannot be resized` in a console, it means a subscriber's message type doesn't match what's actually being published on that topic — check `ros2 topic list | grep -E 'vehicle_status|vehicle_local_position'` to confirm the versioned topic names haven't changed after a PX4 update.
+
 ### Task 2 — Fly to a waypoint and hold
 
 Set `WAYPOINTS = [(0.0, 0.0, -5.0)]` (or wherever you want it to hover) and make `on_timer()` publish that as the target. Rebuild and rerun — it should take off, fly to that point, and hold there indefinitely.
@@ -65,7 +67,14 @@ WAYPOINTS = [
 ```
 In `on_timer()`, once `self.current_position` is populated (from the `vehicle_local_position` subscription), compute the distance to the current target and advance `self.waypoint_index` when it's within `ACCEPTANCE_RADIUS`. After the last waypoint, call `self.land()`.
 
-Rebuild and run the same way as task 1. Once it completes a full lap and lands on its own, compare your `on_timer()` against `offboard_control_solution.py`'s — same idea, but you can run the solution directly with `ros2 launch week3_offboard_control offboard_solution.launch.py` if you want to see a known-working version fly first.
+Rebuild and run the same way as task 1. Once it completes a full lap and lands on its own, compare your `on_timer()` against `offboard_control_solution.py`'s — same idea, but you can run the solution directly if you want to see a known-working version fly first:
+```
+ros2 launch week3_offboard_control offboard_solution.launch.py
+```
+Unlike `offboard_stub.launch.py`, this one also brings up PX4 SITL + the XRCE agent for you (waiting ~20s for them to boot before it starts streaming setpoints), so it works even if you haven't done the "Before starting" step yet. If you already have SITL running from that step (or from a previous run), pass `launch_sitl:=false` so you don't spin up a second conflicting SITL/Gazebo instance:
+```
+ros2 launch week3_offboard_control offboard_solution.launch.py launch_sitl:=false
+```
 
 ### Task 4 — Break the setpoint stream
 

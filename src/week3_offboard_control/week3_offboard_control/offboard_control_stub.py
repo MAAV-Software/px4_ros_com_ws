@@ -53,10 +53,14 @@ class OffboardControl(Node):
         self.vehicle_command_pub = self.create_publisher(
             VehicleCommand, '/fmu/in/vehicle_command', qos_profile)
 
+        # This PX4 build republishes VehicleStatus/VehicleLocalPosition under
+        # versioned topic names via its translation_node rather than the bare
+        # ones (check `ros2 topic list | grep vehicle_local_position` if this
+        # ever stops matching after a PX4 update).
         self.status_sub = self.create_subscription(
-            VehicleStatus, '/fmu/out/vehicle_status', self.on_status, qos_profile)
+            VehicleStatus, '/fmu/out/vehicle_status_v1', self.on_status, qos_profile)
         self.local_position_sub = self.create_subscription(
-            VehicleLocalPosition, '/fmu/out/vehicle_local_position', self.on_local_position, qos_profile)
+            VehicleLocalPosition, '/fmu/out/vehicle_local_position_v1', self.on_local_position, qos_profile)
 
         self.tick = 0
         self.waypoint_index = 0

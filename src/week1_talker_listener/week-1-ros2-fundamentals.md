@@ -18,7 +18,7 @@ Before anything else, get a working copy of the workspace using MAAV's `starter-
 ```
 mkdir -p ~/px4_ros_com_ws
 cd ~/px4_ros_com_ws
-git clone -b starter-code git@github.com:MAAV-Software/px4_ros_com_ws.git .
+git clone -b dev-test https://github.com/MAAV-Software/px4_ros_com_ws.git
 source /opt/ros/humble/setup.bash
 colcon build --symlink-install
 echo "source ~/px4_ros_com_ws/install/setup.bash" >> ~/.bashrc

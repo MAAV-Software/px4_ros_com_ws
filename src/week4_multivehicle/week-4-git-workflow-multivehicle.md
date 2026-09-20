@@ -47,7 +47,7 @@ Confirm the namespacing:
 ```
 ros2 topic list | grep fmu
 ```
-You should see two sets of `/fmu/...` topics: instance 0's un-namespaced (`/fmu/out/vehicle_local_position`) and instance 1's prefixed (`/px4_1/fmu/out/vehicle_local_position`). This comes directly from PX4's own SITL startup script (`ROMFS/px4fmu_common/init.d-posix/rcS` in PX4-Autopilot): instance 0 gets no namespace, instance N gets `px4_N`.
+You should see two sets of `/fmu/...` topics: instance 0's un-namespaced (`/fmu/out/vehicle_local_position_v1`) and instance 1's prefixed (`/px4_1/fmu/out/vehicle_local_position_v1`). This comes directly from PX4's own SITL startup script (`ROMFS/px4fmu_common/init.d-posix/rcS` in PX4-Autopilot): instance 0 gets no namespace, instance N gets `px4_N`. (The `_v1` suffix is a separate thing — PX4 republishing this message under a versioned topic name via its `translation_node` instead of the bare name; see week 2's notes.)
 
 ### Task 3 — Target one vehicle instance by namespace
 

@@ -2,7 +2,7 @@
 """Launch the vehicle_local_position listener in its own terminal.
 
 Automated version of week 2 task 3. Run `ros2 topic echo
-/fmu/out/vehicle_local_position` by hand first (see week-2-px4-sitl-gazebo.md)
+/fmu/out/vehicle_local_position_v1` by hand first (see week-2-px4-sitl-gazebo.md)
 so you can compare the raw CLI output to what this node logs.
 
 Usage:
