@@ -10,5 +10,4 @@ mechanics — don't overthink the content.
 
 ## Roster
 
-- (add your name here)
 - Adam Marrakchi
