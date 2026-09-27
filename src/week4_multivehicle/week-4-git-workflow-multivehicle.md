@@ -31,12 +31,23 @@ The team's git conventions weren't formally specified when this doc was drafted,
 
 ### Task 2 — Launch two SITL instances
 
-Kill any single-instance SITL session from previous weeks first (this script does it for you). From `~/PX4-Autopilot`:
+Kill any single-instance SITL session from previous weeks first (this script does it for you) as well as any Gazebo instance, to do this, run 
+
+`pkill -f gz`. 
+
+Now in a terminal, run:
 ```
-export PX4_SYS_AUTOSTART=4001
-./Tools/simulation/sitl_multiple_run.sh 2 gz_x500 px4_sitl_default
+export PX4_SYS_AUTOSTART=4001 
+~/PX4-Autopilot/Tools/simulation/sitl_multiple_run.sh 2 gz_x500 px4_sitl_default
 ```
 This is PX4's own official multi-instance launcher. Instance 0 starts the Gazebo world and spawns `x500_0`; instance 1 detects the already-running world and spawns `x500_1` into it — you should see both in the Gazebo GUI.
+
+#### POTENTIAL PITFALL 
+If the Gazebo instance(s) crash when you run `~/PX4-Autopilot/Tools/simulation/sitl_multiple_run.sh 2 gz_x500 px4_sitl_default`, you must fix the .sh file manually.
+1. Open `sitl_multiple_run.sh` in VSCode by running `code ~/PX4-Autopilot/Tools/simulation/sitl_multiple_run.sh`
+2. Then, in VSCode, replace `line 34` with `$build_path/bin/px4 -i $n >out.log 2>err.log &` (make sure you are replacing the text `$build_path/bin/px4 -i $n -d "$build_path/etc" >out.log 2>err.log &`, you essentially just want to remove that `-d "$build_path/etc"` in that line)
+3. Make sure you save those changes, close VSCode, then retry the steps above.
+#### ----------------------
 
 Start the agent the same way as week 2 — **only one agent is needed for both instances**, since they share the same UDP port and are told apart by DDS namespace, not by port:
 ```
@@ -48,6 +59,12 @@ Confirm the namespacing:
 ros2 topic list | grep fmu
 ```
 You should see two sets of `/fmu/...` topics: instance 0's un-namespaced (`/fmu/out/vehicle_local_position_v1`) and instance 1's prefixed (`/px4_1/fmu/out/vehicle_local_position_v1`). This comes directly from PX4's own SITL startup script (`ROMFS/px4fmu_common/init.d-posix/rcS` in PX4-Autopilot): instance 0 gets no namespace, instance N gets `px4_N`. (The `_v1` suffix is a separate thing — PX4 republishing this message under a versioned topic name via its `translation_node` instead of the bare name; see week 2's notes.)
+
+In order to kill Gazebo properly here, you should run
+```
+pkill -f gz
+```
+Simply closing the Gazebo GUI with the 'x' in the top corner won't fully kill it, and you wont be able to launch Gazebo cleanly again until you run that command.
 
 ### Task 3 — Target one vehicle instance by namespace
 
