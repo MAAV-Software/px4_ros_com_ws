@@ -71,7 +71,7 @@ while [ $n -lt $sitl_num ]; do
 done
 ```
 5. Make sure you save those changes, close VSCode, then retry the steps above starting from the very beginning of Task 2.
-6. !! Depending on your machine, you may want to increase that number in `sleep 10` , if more than one Gazebo instance launches when you re-run `~/PX4-Autopilot/Tools/simulation/sitl_multiple_run.sh 2 gz_x500 px4_sitl_default`, then you have to increase that number. !!
+6. Depending on your machine, you may want to increase that number in `sleep 10` , if more than one Gazebo instance launches when you re-run `~/PX4-Autopilot/Tools/simulation/sitl_multiple_run.sh 2 gz_x500 px4_sitl_default`, then you have to increase that number.
 #### ----------------------
 
 Start the agent the same way as week 2 — **only one agent is needed for both instances**, since they share the same UDP port and are told apart by DDS namespace, not by port:
