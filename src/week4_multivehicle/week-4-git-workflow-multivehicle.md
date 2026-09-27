@@ -46,7 +46,32 @@ This is PX4's own official multi-instance launcher. Instance 0 starts the Gazebo
 If the Gazebo instance(s) crash when you run `~/PX4-Autopilot/Tools/simulation/sitl_multiple_run.sh 2 gz_x500 px4_sitl_default`, you must fix the .sh file manually.
 1. Open `sitl_multiple_run.sh` in VSCode by running `code ~/PX4-Autopilot/Tools/simulation/sitl_multiple_run.sh`
 2. Then, in VSCode, replace `line 34` with `$build_path/bin/px4 -i $n >out.log 2>err.log &` (make sure you are replacing the text `$build_path/bin/px4 -i $n -d "$build_path/etc" >out.log 2>err.log &`, you essentially just want to remove that `-d "$build_path/etc"` in that line)
-3. Make sure you save those changes, close VSCode, then retry the steps above.
+3. Now insert on `line 37` (right in between `popd &>/dev/null` and `n=$(($n + 1))`) 
+```
+	if [ $n -eq 0 ]; then
+		sleep 10   # give the first instance time to spawn Gazebo before the next one starts
+	fi
+```
+4. Make sure the `while` loop in your .sh file looks like this:
+```
+while [ $n -lt $sitl_num ]; do
+	working_dir="$build_path/instance_$n"
+	[ ! -d "$working_dir" ] && mkdir -p "$working_dir"
+
+	pushd "$working_dir" &>/dev/null
+	echo "starting instance $n in $(pwd)"
+	$build_path/bin/px4 -i $n >out.log 2>err.log &
+	popd &>/dev/null
+
+	if [ $n -eq 0 ]; then
+		sleep 10   # give the first instance time to spawn Gazebo before the next one starts
+	fi
+
+	n=$(($n + 1))
+done
+```
+5. Make sure you save those changes, close VSCode, then retry the steps above starting from the very beginning of Task 2.
+6. !! Depending on your machine, you may want to increase that number in `sleep 10` , if more than one Gazebo instance launches when you re-run `~/PX4-Autopilot/Tools/simulation/sitl_multiple_run.sh 2 gz_x500 px4_sitl_default`, then you have to increase that number. !!
 #### ----------------------
 
 Start the agent the same way as week 2 — **only one agent is needed for both instances**, since they share the same UDP port and are told apart by DDS namespace, not by port:
