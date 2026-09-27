@@ -31,7 +31,8 @@ The team's git conventions weren't formally specified when this doc was drafted,
 
 ### Task 2 — Launch two SITL instances
 
-Kill any single-instance SITL session from previous weeks first (this script does it for you). In a terminal, run:
+Kill any single-instance SITL session from previous weeks first (this script does it for you) as well as any Gazebo instance, to do this, run `pkill -f gz`. 
+Now in a terminal, run:
 ```
 export PX4_SYS_AUTOSTART=4001 
 ~/PX4-Autopilot/Tools/simulation/sitl_multiple_run.sh 2 gz_x500 px4_sitl_default
