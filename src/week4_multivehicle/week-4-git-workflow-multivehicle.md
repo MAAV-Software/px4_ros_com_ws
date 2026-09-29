@@ -52,7 +52,7 @@ If the Gazebo instance(s) crash when you run `~/PX4-Autopilot/Tools/simulation/s
 		sleep 10   # give the first instance time to spawn Gazebo before the next one starts
 	fi
 ```
-4. Make sure the `while` loop in your .sh file looks like this:
+4. The `while` loop in your .sh file should look like like this now:
 ```
 while [ $n -lt $sitl_num ]; do
 	working_dir="$build_path/instance_$n"
