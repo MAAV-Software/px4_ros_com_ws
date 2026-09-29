@@ -114,7 +114,7 @@ instead of
         msg.target_system = 1
 ```
 This error will alse be present in `offboard_control_solution.py`, so fix it there as well if you want to test the solution program. 
-#### --------
+#### ----------------------
 
 
 Once you're done, in order to kill Gazebo properly here, you should run
