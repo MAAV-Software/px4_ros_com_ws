@@ -113,7 +113,7 @@ instead of
 ```
         msg.target_system = 1
 ```
-This error will alse be present in `offboard_control_solution.py`, so fix it there as well if you want to test the solution program. 
+This error will also be present in `offboard_control_solution.py`, so fix it there as well if you want to test the solution program. 
 #### ----------------------
 
 
