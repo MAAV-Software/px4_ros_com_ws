@@ -85,13 +85,9 @@ ros2 topic list | grep fmu
 ```
 You should see two sets of `/fmu/...` topics: instance 0's un-namespaced (`/fmu/out/vehicle_local_position_v1`) and instance 1's prefixed (`/px4_1/fmu/out/vehicle_local_position_v1`). This comes directly from PX4's own SITL startup script (`ROMFS/px4fmu_common/init.d-posix/rcS` in PX4-Autopilot): instance 0 gets no namespace, instance N gets `px4_N`. (The `_v1` suffix is a separate thing — PX4 republishing this message under a versioned topic name via its `translation_node` instead of the bare name; see week 2's notes.)
 
-In order to kill Gazebo properly here, you should run
-```
-pkill -f gz
-```
-Simply closing the Gazebo GUI with the 'x' in the top corner won't fully kill it, and you wont be able to launch Gazebo cleanly again until you run that command.
-
 ### Task 3 — Target one vehicle instance by namespace
+
+Make sure Gazebo is running properly with the two x500's from Task 2.
 
 A `week4_multivehicle` package is provided at [`src/week4_multivehicle`](.), following the same stub + solution pattern as week 3:
 
@@ -105,6 +101,12 @@ source install/setup.bash
 ros2 launch week4_multivehicle offboard_stub.launch.py instance:=1
 ```
 Confirm vehicle 1 flies the waypoint path while vehicle 0 sits idle on the ground — that's the whole point of the exercise: one node, explicitly targeting one drone out of several by namespace, which is exactly the shape Milestone 4 (4 drones, anti-collision, predetermined routes) needs. You can pass `instance:=0` instead to confirm it also still works un-namespaced, and compare against `offboard_solution.launch.py` if you get stuck.
+
+Once you're done, in order to kill Gazebo properly here, you should run
+```
+pkill -f gz
+```
+Simply closing the Gazebo GUI with the 'x' in the top corner won't fully kill it, and you wont be able to launch Gazebo cleanly again until you run that command.
 
 ### Task 4 — PLAN.md milestone walkthrough
 
