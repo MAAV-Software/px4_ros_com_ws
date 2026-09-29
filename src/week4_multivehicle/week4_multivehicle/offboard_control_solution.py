@@ -150,7 +150,7 @@ class OffboardControl(Node):
         msg.command = command
         msg.param1 = param1
         msg.param2 = param2
-        msg.target_system = 1
+        msg.target_system = 1 + self.vehicle_instance
         msg.target_component = 1
         msg.source_system = 1
         msg.source_component = 1

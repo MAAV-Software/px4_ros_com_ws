@@ -87,7 +87,7 @@ You should see two sets of `/fmu/...` topics: instance 0's un-namespaced (`/fmu/
 
 ### Task 3 — Target one vehicle instance by namespace
 
-Make sure Gazebo is running properly with the two x500's from Task 2.
+Make sure Gazebo is running properly with the two x500's from Task 2 as well as QGroundControl (open it now if it's not open).
 
 A `week4_multivehicle` package is provided at [`src/week4_multivehicle`](.), following the same stub + solution pattern as week 3:
 
@@ -101,6 +101,11 @@ source install/setup.bash
 ros2 launch week4_multivehicle offboard_stub.launch.py instance:=1
 ```
 Confirm vehicle 1 flies the waypoint path while vehicle 0 sits idle on the ground — that's the whole point of the exercise: one node, explicitly targeting one drone out of several by namespace, which is exactly the shape Milestone 4 (4 drones, anti-collision, predetermined routes) needs. You can pass `instance:=0` instead to confirm it also still works un-namespaced, and compare against `offboard_solution.launch.py` if you get stuck.
+
+#### IMPORTANT 
+There may be a slight issue in your code depending on when you pulled these files from GitHub (or recieved the VM package). If you don't want/cannot re-pull the files from GitHub, then you will have to fix the error yourself:
+
+Make sure that on line 152 (or 156) in `offboard_control_stub.py`, where `msg.target_system` is assigned, you see `        msg.target_system = 1 + self.vehicle_instance` instead of `        msg.target_system = 1`. This error will alse be present in `offboard_control_solution.py`, so fix it there as well if you want to test the solution program. 
 
 Once you're done, in order to kill Gazebo properly here, you should run
 ```
