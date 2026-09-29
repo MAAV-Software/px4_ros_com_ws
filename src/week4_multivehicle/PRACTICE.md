@@ -11,3 +11,4 @@ mechanics — don't overthink the content.
 ## Roster
 
 - Adam Marrakchi
+- Dean Kalaczinski
