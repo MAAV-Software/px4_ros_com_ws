@@ -105,7 +105,15 @@ Confirm vehicle 1 flies the waypoint path while vehicle 0 sits idle on the groun
 #### IMPORTANT 
 There may be a slight issue in your code depending on when you pulled these files from GitHub (or recieved the VM package). If you don't want/cannot re-pull the files from GitHub, then you will have to fix the error yourself:
 
-Make sure that on line 152 (or 156) in `offboard_control_stub.py`, where `msg.target_system` is assigned, you see `        msg.target_system = 1 + self.vehicle_instance` instead of `        msg.target_system = 1`. This error will alse be present in `offboard_control_solution.py`, so fix it there as well if you want to test the solution program. 
+Make sure that on line 152 (or 156) in `offboard_control_stub.py`, where `msg.target_system` is assigned, you see 
+```
+        msg.target_system = 1 + self.vehicle_instance
+```
+instead of 
+```
+        msg.target_system = 1
+```
+This error will alse be present in `offboard_control_solution.py`, so fix it there as well if you want to test the solution program. 
 
 Once you're done, in order to kill Gazebo properly here, you should run
 ```
