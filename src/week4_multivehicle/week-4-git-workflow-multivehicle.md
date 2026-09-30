@@ -65,7 +65,7 @@ while [ $n -lt $sitl_num ]; do
 
 	pushd "$working_dir" &>/dev/null
 	echo "starting instance $n in $(pwd)"
-	$build_path/bin/px4 -i $n >out.log 2>err.log &
+	PX4_GZ_MODEL_POSE="$((n * 2)),0,0.3,0,0,0" $build_path/bin/px4 -i $n >out.log 2>err.log &
 	popd &>/dev/null
 
 	if [ $n -eq 0 ]; then
