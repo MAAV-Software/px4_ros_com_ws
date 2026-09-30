@@ -11,4 +11,4 @@ mechanics — don't overthink the content.
 ## Roster
 
 - Adam Marrakchi
-- Mia Jalics
+- Mia
