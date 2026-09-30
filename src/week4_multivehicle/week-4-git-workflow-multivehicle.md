@@ -45,7 +45,11 @@ This is PX4's own official multi-instance launcher. Instance 0 starts the Gazebo
 #### POTENTIAL PITFALL 
 If the Gazebo instance(s) crash when you run `~/PX4-Autopilot/Tools/simulation/sitl_multiple_run.sh 2 gz_x500 px4_sitl_default`, you must fix the .sh file manually.
 1. Open `sitl_multiple_run.sh` in VSCode by running `code ~/PX4-Autopilot/Tools/simulation/sitl_multiple_run.sh`
-2. Then, in VSCode, replace `line 34` with `$build_path/bin/px4 -i $n >out.log 2>err.log &` (make sure you are replacing the text `$build_path/bin/px4 -i $n -d "$build_path/etc" >out.log 2>err.log &`, you essentially just want to remove that `-d "$build_path/etc"` in that line)
+2. Then, in VSCode, replace `line 34` with 
+```
+PX4_GZ_MODEL_POSE="0,$((n * 5)),0.3,0,0,0" $build_path/bin/px4 -i $n >out.log 2>err.log &
+``` 
+(make sure you are replacing the text `$build_path/bin/px4 -i $n -d "$build_path/etc" >out.log 2>err.log &`, you essentially just want to remove that `-d "$build_path/etc"` and add `PX4_GZ_MODEL_POSE="0,$((n * 5)),0.3,0,0,0" ` in that line)
 3. Now insert on `line 37` (right in between `popd &>/dev/null` and `n=$(($n + 1))`) 
 ```
 	if [ $n -eq 0 ]; then
