@@ -1,3 +1,6 @@
 log/*
 !log/.gitkeep
 archive/
+onboarding/
+build/
+install/
