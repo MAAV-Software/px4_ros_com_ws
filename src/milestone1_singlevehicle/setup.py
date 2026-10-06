@@ -23,7 +23,6 @@ setup(
     license='BSD-3',
     entry_points={
         'console_scripts': [
-            'offboard_stub = milestone1_singlevehicle.offboard_control_stub:main',
             'offboard_solution = milestone1_singlevehicle.offboard_control_solution:main',
         ],
     },

@@ -1,5 +1,5 @@
-# Same path as the hardcoded WAYPOINTS list in offboard_control_solution.py,
-# for the task 4 extension: load waypoints from this file instead of hardcoding them.
+# Same path as the hardcoded WAYPOINTS list in offboard_control_solution.py.
+# Uncomment the YAML-loading block in that node to fly this file instead.
 # Coordinates are local NED frame, metres (x=north, y=east, z=down, so negative z is up).
 waypoints:
   - [0.0, 0.0, -5.0]

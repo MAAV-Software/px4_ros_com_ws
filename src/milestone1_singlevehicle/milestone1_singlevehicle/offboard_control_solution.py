@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Reference solution — week 3 onboarding exercise.
+"""Milestone 1 single-vehicle offboard control, based on the week 3 onboarding
+reference solution.
 
 Minimal PX4 offboard control: arms, takes off, flies a short hardcoded
-waypoint path, then lands. Read this after attempting offboard_control_stub.py
-yourself, to compare against your own implementation.
+waypoint path, then lands.
 
-This is deliberately simplified for a first offboard-control lesson (single
-vehicle, no namespacing, no failure recovery) — not a production controller.
+Still the simplified onboarding controller (single vehicle, no namespacing,
+no failure recovery) — not a production controller.
 """
 import rclpy
 from rclpy.node import Node

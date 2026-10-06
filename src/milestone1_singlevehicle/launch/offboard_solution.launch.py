@@ -1,7 +1,7 @@
 #!/usr/bin/env python
-"""Launch the week 3 offboard control reference solution, optionally bringing
-up PX4 SITL + the Micro XRCE-DDS Agent (week2_px4_sitl) first — each in its
-own terminal.
+"""Launch the milestone 1 offboard control node, optionally bringing up PX4
+SITL + the Micro XRCE-DDS Agent (px4_sitl.launch.py) first — each in its own
+terminal. Gazebo runs headless (no GUI window) unless headless:=false.
 
 Usage:
   # SITL/agent not running yet — bring them up too, then the solution node:
@@ -11,6 +11,9 @@ Usage:
   # "Before starting" step) — just the solution node, so you don't spin up a
   # second conflicting SITL/Gazebo instance:
   ros2 launch milestone1_singlevehicle offboard_solution.launch.py launch_sitl:=false
+
+  # Show the Gazebo GUI instead of running headless:
+  ros2 launch milestone1_singlevehicle offboard_solution.launch.py headless:=false
 """
 import os
 
@@ -32,13 +35,18 @@ SITL_STARTUP_DELAY = 20.0
 def generate_launch_description():
     launch_sitl_arg = DeclareLaunchArgument(
         'launch_sitl', default_value='true',
-        description='Also launch PX4 SITL + the XRCE agent (week2_px4_sitl). '
+        description='Also launch PX4 SITL + the XRCE agent (px4_sitl.launch.py). '
                      'Set to false if they are already running.')
     launch_sitl = LaunchConfiguration('launch_sitl')
 
+    headless_arg = DeclareLaunchArgument(
+        'headless', default_value='true',
+        description='Run Gazebo without its GUI window. Only used when launch_sitl is true.')
+
     sitl_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
-            os.path.join(get_package_share_directory('week2_px4_sitl'), 'px4_sitl.launch.py')),
+            os.path.join(get_package_share_directory('milestone1_singlevehicle'), 'px4_sitl.launch.py')),
+        launch_arguments={'headless': LaunchConfiguration('headless')}.items(),
         condition=IfCondition(launch_sitl))
 
     # We launched SITL ourselves — wait for it to boot before streaming setpoints.
@@ -63,6 +71,7 @@ def generate_launch_description():
 
     return LaunchDescription([
         launch_sitl_arg,
+        headless_arg,
         sitl_launch,
         delayed_offboard_node,
         immediate_offboard_node,
