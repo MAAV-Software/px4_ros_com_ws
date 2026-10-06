@@ -12,3 +12,4 @@ mechanics — don't overthink the content.
 
 - Adam Marrakchi
 - Mia
+- Hans 
