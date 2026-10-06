@@ -1,8 +1,21 @@
-# Milestone 1 waypoint path, loaded by offboard_control_solution.py at startup.
-# The drone takes off to the first waypoint, flies them in order, then lands at the last.
-# Coordinates are local NED frame, metres (x=north, y=east, z=down, so negative z is up).
 waypoints:
-  - [0.0, 0.0, -5.0]
-  - [5.0, 0.0, -5.0]
-  - [5.0, 5.0, -5.0]
-  - [0.0, 5.0, -5.0]
+  - {pos: [0.0, 0.0, -5.0], yaw: 0,   hold_s: 5,  tests: [T1]}
+
+
+thresholds:
+  sitl:
+    position_error_m: 0.5
+    overshoot_m: 0.5
+    settle_time_s: 3
+    cross_track_m: 1.0
+    heading_error_deg: 5
+    hover_drift_m: 0.2
+    tilt_max_deg: 45
+  hitl:
+    position_error_m: 0.5
+    overshoot_m: 1.0
+    settle_time_s: 5
+    cross_track_m: 2.0
+    heading_error_deg: 10
+    hover_drift_m: 1.0
+    tilt_max_deg: 45
