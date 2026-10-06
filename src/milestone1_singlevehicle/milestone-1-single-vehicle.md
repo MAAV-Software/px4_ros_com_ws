@@ -15,7 +15,7 @@ Pass SITL before you try HITL. Milestone 1 is complete when both stages pass, an
 
 1. Streams position setpoints at 10 Hz for 1 s (`ARM_AFTER_TICKS = 10`).
 2. Sends **arm**, then switches PX4 to **offboard** mode.
-3. Takes off to the first waypoint and flies the path in `WAYPOINTS`. A waypoint counts as reached within 0.5 m (`ACCEPTANCE_RADIUS`).
+3. Takes off to the first waypoint and flies the path in [`resource/milestone1_path.yaml`](resource/milestone1_path.yaml). A waypoint counts as reached within 0.5 m (`ACCEPTANCE_RADIUS`).
 4. Sends **land** after the last waypoint and stops streaming setpoints.
 
 Default path, in the local NED frame (metres; x = north, y = east, z = down, so negative z is up):
@@ -28,7 +28,9 @@ Default path, in the local NED frame (metres; x = north, y = east, z = down, so 
 | 3 | 0 | 5 | -5 | South (return leg) |
 | — | — | — | — | Land in place at #3 |
 
-The origin is wherever PX4's local position estimate initialised, which is normally where the drone was when it booted. The same path is in [`resource/waypoints.yaml`](resource/waypoints.yaml). To load it from YAML instead of the hardcoded list, uncomment the block in the node.
+The origin is wherever PX4's local position estimate initialised, which is normally where the drone was when it booted.
+
+To change the path, edit `milestone1_path.yaml` and rebuild (`colcon build --packages-select milestone1_singlevehicle`). The node reads the installed copy, so edits don't take effect until you rebuild. On startup the node logs `loaded N waypoints from milestone1_path.yaml`. If you change the path, update the table above and the HITL area size to match.
 
 **Known limits:** single vehicle, no namespacing, no failure recovery, and yaw fixed at 0 (facing north). It doesn't check whether the arm or mode switch succeeded; it just keeps streaming. These limits are acceptable for Milestone 1, and the HITL safety rules below assume them.
 
@@ -74,7 +76,7 @@ Record each run in the [results log](#results-log).
 
 ### Troubleshooting
 
-- **Never arms or climbs, and you see `RTPS_READER_HISTORY Error ... cannot be resized`:** the message type doesn't match the topic. The node subscribes to `/fmu/out/vehicle_status_v1` and `/fmu/out/vehicle_local_position_v1`, the versioned names this PX4 build publishes. Check with `ros2 topic list | grep -E 'vehicle_status|vehicle_local_position'`.
+- **Climbs to the first waypoint but never advances, or you see `RTPS_READER_HISTORY Error ... cannot be resized`:** the message type doesn't match the topic. The node subscribes to `/fmu/out/vehicle_local_position_v1`, the versioned name this PX4 build publishes. Check with `ros2 topic list | grep vehicle_local_position`.
 - **No `/fmu/...` topics at all:** the XRCE agent isn't running, or PX4 didn't connect to it. Check the agent's terminal.
 - **Mode switch rejected:** PX4 needs a steady setpoint stream *before* it accepts Offboard mode. Check that the node is publishing (`ros2 topic hz /fmu/in/trajectory_setpoint`, which should show ~10 Hz).
 

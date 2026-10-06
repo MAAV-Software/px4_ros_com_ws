@@ -1,5 +1,5 @@
-# Same path as the hardcoded WAYPOINTS list in offboard_control_solution.py.
-# Uncomment the YAML-loading block in that node to fly this file instead.
+# Milestone 1 waypoint path, loaded by offboard_control_solution.py at startup.
+# The drone takes off to the first waypoint, flies them in order, then lands at the last.
 # Coordinates are local NED frame, metres (x=north, y=east, z=down, so negative z is up).
 waypoints:
   - [0.0, 0.0, -5.0]

@@ -2,13 +2,17 @@
 """Milestone 1 single-vehicle offboard control, based on the week 3 onboarding
 reference solution.
 
-Minimal PX4 offboard control: arms, takes off, flies a short hardcoded
-waypoint path, then lands.
+Minimal PX4 offboard control: arms, takes off, flies the waypoint path from
+resource/milestone1_path.yaml, then lands.
 
 Still the simplified onboarding controller (single vehicle, no namespacing,
 no failure recovery) — not a production controller.
 """
+import os
+
 import rclpy
+import yaml
+from ament_index_python.packages import get_package_share_directory
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSDurabilityPolicy, QoSHistoryPolicy
 
@@ -16,35 +20,23 @@ from px4_msgs.msg import (
     OffboardControlMode,
     TrajectorySetpoint,
     VehicleCommand,
-    VehicleStatus,
     VehicleLocalPosition,
 )
 
-# Hardcoded waypoint path in the local NED frame (x=north, y=east, z=down —
-# so negative z is up), in metres. First waypoint doubles as the takeoff target.
-WAYPOINTS = [
-    (0.0, 0.0, -5.0),
-    (5.0, 0.0, -5.0),
-    (5.0, 5.0, -5.0),
-    (0.0, 5.0, -5.0),
-]
+PATH_FILE = 'milestone1_path.yaml'  # installed to share/milestone1_singlevehicle/resource/
 
-# --- Extension solution: load WAYPOINTS from resource/waypoints.yaml instead ---
-# of hardcoding them above. Uncomment this block (and the imports below) to
-# use it; it replaces the WAYPOINTS list assigned above.
-#
-# import os
-# import yaml
-# from ament_index_python.packages import get_package_share_directory
-#
-# def load_waypoints_from_yaml(package_name='milestone1_singlevehicle', filename='waypoints.yaml'):
-#     share_dir = get_package_share_directory(package_name)
-#     yaml_path = os.path.join(share_dir, 'resource', filename)
-#     with open(yaml_path) as f:
-#         data = yaml.safe_load(f)
-#     return [tuple(waypoint) for waypoint in data['waypoints']]
-#
-# WAYPOINTS = load_waypoints_from_yaml()
+
+def load_waypoints(filename=PATH_FILE):
+    """Load the waypoint path: a list of (x, y, z) in the local NED frame, metres."""
+    share_dir = get_package_share_directory('milestone1_singlevehicle')
+    with open(os.path.join(share_dir, 'resource', filename)) as f:
+        data = yaml.safe_load(f)
+
+    waypoints = [tuple(float(v) for v in waypoint) for waypoint in data['waypoints']]
+    if not waypoints or any(len(waypoint) != 3 for waypoint in waypoints):
+        raise ValueError(f'{filename}: "waypoints" must be a non-empty list of [x, y, z]')
+    return waypoints
+
 
 ACCEPTANCE_RADIUS = 0.5  # metres — how close counts as "reached" a waypoint
 ARM_AFTER_TICKS = 10     # send setpoints this many ticks before arming/switching to offboard
@@ -68,25 +60,22 @@ class OffboardControl(Node):
         self.vehicle_command_pub = self.create_publisher(
             VehicleCommand, '/fmu/in/vehicle_command', qos_profile)
 
-        # This PX4 build republishes VehicleStatus/VehicleLocalPosition under
-        # versioned topic names via its translation_node rather than the bare
-        # ones (check `ros2 topic list | grep vehicle_local_position` if this
-        # ever stops matching after a PX4 update).
-        self.status_sub = self.create_subscription(
-            VehicleStatus, '/fmu/out/vehicle_status_v1', self.on_status, qos_profile)
+        # This PX4 build republishes VehicleLocalPosition under a versioned
+        # topic name via its translation_node rather than the bare one (check
+        # `ros2 topic list | grep vehicle_local_position` if this ever stops
+        # matching after a PX4 update).
         self.local_position_sub = self.create_subscription(
             VehicleLocalPosition, '/fmu/out/vehicle_local_position_v1', self.on_local_position, qos_profile)
 
+        self.waypoints = load_waypoints()
+        self.get_logger().info(f'loaded {len(self.waypoints)} waypoints from {PATH_FILE}')
+
         self.tick = 0
         self.waypoint_index = 0
-        self.vehicle_status = VehicleStatus()
         self.current_position = None
         self.landed = False
 
         self.timer = self.create_timer(0.1, self.on_timer)  # 10 Hz — PX4 expects at least 2 Hz
-
-    def on_status(self, msg):
-        self.vehicle_status = msg
 
     def on_local_position(self, msg):
         self.current_position = msg
@@ -112,7 +101,7 @@ class OffboardControl(Node):
             self.advance_waypoint_if_reached()
 
     def current_target(self):
-        return WAYPOINTS[self.waypoint_index]
+        return self.waypoints[self.waypoint_index]
 
     def advance_waypoint_if_reached(self):
         tx, ty, tz = self.current_target()
@@ -124,7 +113,7 @@ class OffboardControl(Node):
         if distance >= ACCEPTANCE_RADIUS:
             return
 
-        if self.waypoint_index < len(WAYPOINTS) - 1:
+        if self.waypoint_index < len(self.waypoints) - 1:
             self.waypoint_index += 1
             self.get_logger().info(
                 f'reached waypoint {self.waypoint_index - 1}, advancing to {self.waypoint_index}')
