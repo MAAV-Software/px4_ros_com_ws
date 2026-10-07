@@ -15,14 +15,22 @@ DT = 0.1
 
 # --- Path file ---------------------------------------------------------------
 
+def test_shipped_path_yaw_is_read_as_radians():
+    import os
+    path = os.path.join(os.path.dirname(__file__), '..', 'resource', 'milestone1_path.yaml')
+    yaws = [w.yaw_deg for w in scoring.load_config(path).waypoints]
+    assert yaws[14] == pytest.approx(90) and yaws[15] == pytest.approx(180) and yaws[18] == pytest.approx(-90)
+    assert all(abs(y) <= 180 for y in yaws)
+
+
 def test_parse_accepts_plain_and_full_waypoints():
     config = scoring.parse_config({
-        'waypoints': [[0, 0, -5], {'pos': [5, 0, -5], 'yaw': 90, 'hold_s': 5, 'tests': ['T3', 'Y1']}],
+        'waypoints': [[0, 0, -5], {'pos': [5, 0, -5], 'yaw': math.pi / 2, 'hold_s': 5, 'tests': ['T3', 'Y1']}],
         'thresholds': THRESHOLDS,
     })
     plain, full = config.waypoints
     assert plain.pos.tolist() == [0, 0, -5] and plain.yaw_deg is None and plain.tests == []
-    assert full.yaw_deg == 90 and full.hold_s == 5 and full.tests == ['T3', 'Y1']
+    assert full.yaw_deg == pytest.approx(90) and full.hold_s == 5 and full.tests == ['T3', 'Y1']
     assert config.thresholds['hitl']['overshoot_m'] == 0.5
 
 
