@@ -95,7 +95,7 @@ Only the header comment changed. The waypoints are the same: `(0,0,-5) → (5,0,
 | File | State |
 |---|---|
 | `milestone-1-single-vehicle.md` | Edited but not committed (117 lines added). Adds the freedom-of-flight test matrix, the proposed pass thresholds, the recording and measuring steps, and the test order. Updates the pass criteria and the results log to match. |
-| `flight-scoring-plan.md` | New, not committed. A plan for automatic pass/fail scoring of test flights. Only the plan document exists; none of the plan has been built. |
+| `testing.md` | New, not committed. A plan for automatic pass/fail scoring of test flights. Only the plan document exists; none of the plan has been built. |
 | `week3-to-milestone1-review.md` | This document. |
 
 ## What's been verified

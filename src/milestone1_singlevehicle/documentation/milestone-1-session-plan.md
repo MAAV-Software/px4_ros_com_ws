@@ -10,14 +10,14 @@
 
 Related docs:
 - The test matrix and thresholds: [`milestone-1-single-vehicle.md`](milestone-1-single-vehicle.md)
-- The full scoring design: [`flight-scoring-plan.md`](flight-scoring-plan.md)
+- The full scoring design: [`testing.md`](testing.md#scoring-design)
 
 ## Scope
 
 | In scope | Deferred (Milestone 1 follow-up) | Why deferred |
 |---|---|---|
 | T1–T9 (translation), Y1–Y2 (yaw), R1 (indirect roll/pitch), H1 (hover hold), S1, F1, L1 | V1 (velocity mode), R2 (direct attitude mode) | PLAN.md defines Milestone 1 as baseline offboard control on a single track. Later milestones use position control. V1 and R2 each add a new control mode with its own safety work. V1 can be tried in SITL in Session 2's [stretch slot](#session-2-sitl-runs-90-min). |
-| Post-flight scoring from the `.ulg` log (`m1_analyze`) | Live monitor node from `flight-scoring-plan.md` | The `.ulg` logs contain everything needed, so one tool covers both SITL and HITL. During a flight, the node's own logs show progress. |
+| Post-flight scoring from the `.ulg` log (`m1_analyze`) | Live monitor node from `testing.md` | The `.ulg` logs contain everything needed, so one tool covers both SITL and HITL. During a flight, the node's own logs show progress. |
 
 ## The test path
 
@@ -63,7 +63,7 @@ The lead prepares this, with Claude's help if wanted (about 45 min). It's test t
    ```
    ros2 run milestone1_singlevehicle m1_analyze <flight.ulg> --stage sitl|hitl [--path <yaml>]
    ```
-   - It splits the flight into legs wherever the logged `trajectory_setpoint` changes. This is the setpoint the node sent. It corrects `flight-scoring-plan.md`, which used `vehicle_local_position_setpoint`. That topic can change continuously, which would make leg splitting unreliable.
+   - It splits the flight into legs wherever the logged `trajectory_setpoint` changes. This is the setpoint the node sent. It corrects `testing.md`, which used `vehicle_local_position_setpoint`. That topic can change continuously, which would make leg splitting unreliable.
    - It scores each leg's measures against the thresholds in the path YAML and writes a PASS/FAIL report to `log/m1_reports/`.
    - It needs `pip install pyulog`.
 2. **Unit tests** for the scoring maths, using made-up flight data.
