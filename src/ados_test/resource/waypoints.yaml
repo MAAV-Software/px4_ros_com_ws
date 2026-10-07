@@ -1,0 +1,14 @@
+# Flight path for the ados_test square-flight demo.
+#
+# Coordinates are local NED frame, metres, relative to the takeoff point
+# (x=north, y=east, z=down — so negative z is up).
+#
+# 50 yards = 45.72 m, 5 yards = 4.572 m (1 yard = 0.9144 m). The path climbs
+# to 5 yards AGL, traces a 50x50 yard square, then returns to the start
+# corner so the node can command a landing right above the takeoff point.
+waypoints:
+  - [0.0,   0.0,   -4.572]  # climb to altitude above takeoff point
+  - [45.72, 0.0,   -4.572]  # north 50 yards
+  - [45.72, 45.72, -4.572]  # east 50 yards
+  - [0.0,   45.72, -4.572]  # south 50 yards
+  - [0.0,   0.0,   -4.572]  # west 50 yards, back to start
