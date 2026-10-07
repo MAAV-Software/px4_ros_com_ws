@@ -14,6 +14,9 @@ Usage:
 
   # Show the Gazebo GUI instead of running headless:
   ros2 launch milestone1_singlevehicle offboard_solution.launch.py headless:=false
+
+  # Use a different waypoint YAML (yaw in radians):
+  ros2 launch milestone1_singlevehicle offboard_solution.launch.py path:=/path/to/waypoints.yaml
 """
 import os
 
@@ -22,8 +25,10 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, TimerAction
 from launch.conditions import IfCondition, UnlessCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
+from launch_ros.substitutions import FindPackageShare
 
 # PX4 SITL + Gazebo can take a while to build and boot, especially the first
 # time — give it a head start before the offboard node begins streaming
@@ -43,6 +48,18 @@ def generate_launch_description():
         'headless', default_value='true',
         description='Run Gazebo without its GUI window. Only used when launch_sitl is true.')
 
+    # Resolve the installed YAML so launch works from any current directory.
+    path_arg = DeclareLaunchArgument(
+        'path',
+        default_value=PathJoinSubstitution([
+            FindPackageShare('milestone1_singlevehicle'), 'resource',
+            'milestone1_path.yaml',
+        ]),
+        description='Waypoint YAML file (yaw in radians)')
+    waypoints_parameters = [{
+        'waypoints_file': ParameterValue(LaunchConfiguration('path'), value_type=str),
+    }]
+
     sitl_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(get_package_share_directory('milestone1_singlevehicle'), 'px4_sitl.launch.py')),
@@ -57,6 +74,7 @@ def generate_launch_description():
                 package='milestone1_singlevehicle',
                 executable='offboard_solution',
                 name='offboard_control_solution',
+                parameters=waypoints_parameters,
                 prefix='gnome-terminal --'),
         ],
         condition=IfCondition(launch_sitl))
@@ -66,12 +84,14 @@ def generate_launch_description():
         package='milestone1_singlevehicle',
         executable='offboard_solution',
         name='offboard_control_solution',
+        parameters=waypoints_parameters,
         prefix='gnome-terminal --',
         condition=UnlessCondition(launch_sitl))
 
     return LaunchDescription([
         launch_sitl_arg,
         headless_arg,
+        path_arg,
         sitl_launch,
         delayed_offboard_node,
         immediate_offboard_node,
