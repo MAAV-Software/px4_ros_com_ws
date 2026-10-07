@@ -3,16 +3,21 @@
 reference solution.
 
 Minimal PX4 offboard control: arms, takes off, flies the waypoint path from
-resource/milestone1_path.yaml, then lands.
+the YAML given by the waypoints_file parameter, then lands.
+
+Usage:
+  ros2 run milestone1_singlevehicle offboard_solution --ros-args \
+    -p waypoints_file:=/absolute/path/to/waypoints.yaml
+or via the provided launch file:
+  ros2 launch milestone1_singlevehicle offboard_solution.launch.py
 
 Still the simplified onboarding controller (single vehicle, no namespacing,
 no failure recovery) — not a production controller.
 """
-import os
+import math
 
 import rclpy
 import yaml
-from ament_index_python.packages import get_package_share_directory
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSDurabilityPolicy, QoSHistoryPolicy
 
@@ -23,21 +28,6 @@ from px4_msgs.msg import (
     VehicleLocalPosition,
 )
 
-PATH_FILE = 'milestone1_path.yaml'  # installed to share/milestone1_singlevehicle/resource/
-
-
-def load_waypoints(filename=PATH_FILE):
-    """Load the waypoint path: a list of (x, y, z) in the local NED frame, metres."""
-    share_dir = get_package_share_directory('milestone1_singlevehicle')
-    with open(os.path.join(share_dir, 'resource', filename)) as f:
-        data = yaml.safe_load(f)
-
-    waypoints = [tuple(float(v) for v in waypoint) for waypoint in data['waypoints']]
-    if not waypoints or any(len(waypoint) != 3 for waypoint in waypoints):
-        raise ValueError(f'{filename}: "waypoints" must be a non-empty list of [x, y, z]')
-    return waypoints
-
-
 ACCEPTANCE_RADIUS = 0.5  # metres — how close counts as "reached" a waypoint
 ARM_AFTER_TICKS = 10     # send setpoints this many ticks before arming/switching to offboard
 PX4_CUSTOM_MAIN_MODE_OFFBOARD = 6.0
@@ -46,6 +36,36 @@ PX4_CUSTOM_MAIN_MODE_OFFBOARD = 6.0
 class OffboardControl(Node):
     def __init__(self):
         super().__init__('offboard_control_solution')
+        self.declare_parameter("waypoints_file", "")
+        waypoints_file = self.get_parameter("waypoints_file").value
+
+        if not waypoints_file:
+            raise ValueError("Provide the waypoints_file ROS parameter")
+
+        with open(waypoints_file, "r") as file:
+            data = yaml.safe_load(file)
+
+        # YAML yaw is already in radians, matching PX4.
+        self.waypoints = [
+            {
+                'pos': tuple(float(v) for v in waypoint['pos']),
+                'yaw': float(waypoint['yaw']),
+                'hold_s': float(waypoint['hold_s']),
+            }
+            for waypoint in data['waypoints']
+        ]
+
+        if not self.waypoints:
+            raise ValueError('The path must contain at least one waypoint')
+        for waypoint in self.waypoints:
+            if (
+                len(waypoint['pos']) != 3
+                or not all(math.isfinite(v) for v in waypoint['pos'])
+                or not math.isfinite(waypoint['yaw'])
+                or not math.isfinite(waypoint['hold_s'])
+                or waypoint['hold_s'] < 0
+            ):
+                raise ValueError('Invalid waypoint position, yaw, or hold_s')
 
         qos_profile = QoSProfile(
             reliability=QoSReliabilityPolicy.BEST_EFFORT,
@@ -67,13 +87,14 @@ class OffboardControl(Node):
         self.local_position_sub = self.create_subscription(
             VehicleLocalPosition, '/fmu/out/vehicle_local_position_v1', self.on_local_position, qos_profile)
 
-        self.waypoints = load_waypoints()
-        self.get_logger().info(f'loaded {len(self.waypoints)} waypoints from {PATH_FILE}')
+        self.get_logger().info(f'loaded {len(self.waypoints)} waypoints from {waypoints_file}')
 
         self.tick = 0
         self.waypoint_index = 0
         self.current_position = None
         self.landed = False
+        # No hold begins until both position and heading are within tolerance.
+        self.hold_started_ns = None
 
         self.timer = self.create_timer(0.1, self.on_timer)  # 10 Hz — PX4 expects at least 2 Hz
 
@@ -104,21 +125,53 @@ class OffboardControl(Node):
         return self.waypoints[self.waypoint_index]
 
     def advance_waypoint_if_reached(self):
-        tx, ty, tz = self.current_target()
-        dx = self.current_position.x - tx
-        dy = self.current_position.y - ty
-        dz = self.current_position.z - tz
-        distance = (dx ** 2 + dy ** 2 + dz ** 2) ** 0.5
-
-        if distance >= ACCEPTANCE_RADIUS:
+        target = self.current_target()
+        position = self.current_position
+        if position is None or not position.xy_valid or not position.z_valid:
+            self.hold_started_ns = None
             return
 
+        tx, ty, tz = target['pos']
+        distance = math.sqrt(
+            (position.x - tx) ** 2
+            + (position.y - ty) ** 2
+            + (position.z - tz) ** 2
+        )
+        # Wrap across +/-180 degrees: 179 to -179 is a 2-degree error.
+        yaw_difference = target['yaw'] - position.heading
+        heading_error = abs(math.atan2(
+            math.sin(yaw_difference), math.cos(yaw_difference)))
+        reached = (
+            math.isfinite(distance)
+            and math.isfinite(heading_error)
+            and distance <= ACCEPTANCE_RADIUS
+            and heading_error <= math.radians(5.0)
+        )
+        if not reached:
+            # The hold must be continuous; leaving either tolerance resets it.
+            self.hold_started_ns = None
+            return
+
+        now_ns = self.get_clock().now().nanoseconds
+        if self.hold_started_ns is None or now_ns < self.hold_started_ns:
+            self.hold_started_ns = now_ns
+            self.get_logger().info(
+                f'Waypoint {self.waypoint_index} reached; '
+                f'holding for {target["hold_s"]} seconds')
+
+        # on_timer continues sending this position and yaw during the hold.
+        elapsed_s = (now_ns - self.hold_started_ns) / 1e9
+        if elapsed_s < target['hold_s']:
+            return
+
+        self.hold_started_ns = None
         if self.waypoint_index < len(self.waypoints) - 1:
             self.waypoint_index += 1
             self.get_logger().info(
-                f'reached waypoint {self.waypoint_index - 1}, advancing to {self.waypoint_index}')
+                f'advancing to waypoint {self.waypoint_index}')
         else:
-            self.get_logger().info('reached final waypoint, landing')
+            # Finish the last hold before requesting landing.
+            self.get_logger().info('Final hold complete; landing')
             self.land()
             self.landed = True
 
@@ -130,8 +183,9 @@ class OffboardControl(Node):
 
     def publish_trajectory_setpoint(self, target):
         msg = TrajectorySetpoint()
-        msg.position = [float(target[0]), float(target[1]), float(target[2])]
-        msg.yaw = 0.0
+        msg.position = list(target['pos'])
+        # Send the yaw in radians directly from the YAML.
+        msg.yaw = target['yaw']
         msg.timestamp = int(self.get_clock().now().nanoseconds / 1000)
         self.trajectory_setpoint_pub.publish(msg)
 

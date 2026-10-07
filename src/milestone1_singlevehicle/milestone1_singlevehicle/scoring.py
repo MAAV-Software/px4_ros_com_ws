@@ -68,7 +68,7 @@ STATUS_ORDER = ('FAIL', 'INCOMPLETE', 'NO DATA', 'PASS', 'NOT FLOWN', 'NOT TESTE
 @dataclass
 class Waypoint:
     pos: np.ndarray            # local NED, metres
-    yaw_deg: float = None      # None: heading not commanded (plain [x, y, z] entry)
+    yaw_deg: float = None      # degrees (the path file has radians); None: heading not commanded
     hold_s: float = 0.0
     tests: list = field(default_factory=list)
 
@@ -86,7 +86,8 @@ def load_config(path):
 
 def parse_config(data, source='path file'):
     """Validate the path YAML. Waypoints are plain [x, y, z] lists or
-    {pos: [x, y, z], yaw: deg, hold_s: s, tests: [IDs]} entries."""
+    {pos: [x, y, z], yaw: rad, hold_s: s, tests: [IDs]} entries. Yaw is in radians,
+    as in the node and PX4; it is stored in degrees."""
     if not isinstance(data, dict):
         raise ValueError(f'{source}: expected a mapping with "waypoints" and "thresholds"')
 
@@ -133,7 +134,7 @@ def _parse_waypoint(entry, where):
     yaw = entry.get('yaw')
 
     return Waypoint(_parse_position(entry['pos'], where),
-                    None if yaw is None else float(yaw), hold_s, list(tests))
+                    None if yaw is None else math.degrees(float(yaw)), hold_s, list(tests))
 
 
 def _parse_position(value, where):

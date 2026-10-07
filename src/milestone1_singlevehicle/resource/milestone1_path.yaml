@@ -1,7 +1,29 @@
-# Waypoint yaw is in radians (0=north, pi/2=east).
+# Full 22-waypoint Milestone 1 path.
+# Local NED positions in metres: x=north, y=east, negative z=altitude.
+# Yaw is in radians (0=north, pi/2=east); hold_s is the continuous hold duration.
 waypoints:
-  - {pos: [0.0, 0.0, -5.0], yaw: 0.0,   hold_s: 5,  tests: [T1]}
-
+  - {pos: [0.0, 0.0, -5.0], yaw: 0.0, hold_s: 5, tests: [T1]} # 0: Climb
+  - {pos: [5.0, 0.0, -5.0], yaw: 0.0, hold_s: 5, tests: [T3]} # 1: North
+  - {pos: [5.0, 5.0, -5.0], yaw: 0.0, hold_s: 5, tests: [T5]} # 2: East
+  - {pos: [0.0, 5.0, -5.0], yaw: 0.0, hold_s: 5, tests: [T4]} # 3: South
+  - {pos: [0.0, 0.0, -5.0], yaw: 0.0, hold_s: 5, tests: [T6]} # 4: West
+  - {pos: [0.0, 0.0, -3.0], yaw: 0.0, hold_s: 5, tests: [T2]} # 5: Descend
+  - {pos: [4.0, 4.0, -3.0], yaw: 0.0, hold_s: 5, tests: [T7]} # 6: Diagonal NE
+  - {pos: [4.0, 0.0, -3.0], yaw: 0.0, hold_s: 3, tests: []} # 7: Reposition
+  - {pos: [0.0, 4.0, -3.0], yaw: 0.0, hold_s: 5, tests: [T7]} # 8: Diagonal NW
+  - {pos: [4.0, 0.0, -6.0], yaw: 0.0, hold_s: 5, tests: [T8]} # 9: 3D SE + climb
+  - {pos: [0.0, 4.0, -4.0], yaw: 0.0, hold_s: 5, tests: [T8]} # 10: 3D NW + descend
+  - {pos: [1.0, 4.0, -4.0], yaw: 0.0, hold_s: 3, tests: [T9]} # 11: Small: 1 m north
+  - {pos: [1.0, 5.0, -4.0], yaw: 0.0, hold_s: 3, tests: [T9]} # 12: Small: 1 m east
+  - {pos: [2.0, 2.0, -5.0], yaw: 0.0, hold_s: 10, tests: [H1]} # 13: Hover hold
+  - {pos: [2.0, 2.0, -5.0], yaw: 1.5707963267948966, hold_s: 3, tests: [Y1]} # 14: Yaw clockwise to pi/2
+  - {pos: [2.0, 2.0, -5.0], yaw: 3.141592653589793, hold_s: 3, tests: [Y1]} # 15: Yaw clockwise to pi
+  - {pos: [2.0, 2.0, -5.0], yaw: 1.5707963267948966, hold_s: 3, tests: [Y1]} # 16: Yaw counter-clockwise to pi/2
+  - {pos: [2.0, 2.0, -5.0], yaw: 0.0, hold_s: 3, tests: [Y1]} # 17: Yaw counter-clockwise to 0
+  - {pos: [2.0, 2.0, -5.0], yaw: -1.5707963267948966, hold_s: 3, tests: [Y1]} # 18: Yaw counter-clockwise to -pi/2
+  - {pos: [2.0, 2.0, -5.0], yaw: 0.0, hold_s: 3, tests: [Y1]} # 19: Yaw clockwise to 0
+  - {pos: [4.0, 2.0, -5.0], yaw: 1.5707963267948966, hold_s: 5, tests: [Y2]} # 20: Yaw while moving
+  - {pos: [2.0, 2.0, -5.0], yaw: 0.0, hold_s: 5, tests: [Y2]} # 21: Yaw while moving, then land
 
 thresholds:
   sitl:
