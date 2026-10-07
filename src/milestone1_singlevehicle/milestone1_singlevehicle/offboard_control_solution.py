@@ -26,11 +26,14 @@ from px4_msgs.msg import (
     TrajectorySetpoint,
     VehicleCommand,
     VehicleLocalPosition,
+    VehicleStatus,
 )
 
 ACCEPTANCE_RADIUS = 0.5  # metres — how close counts as "reached" a waypoint
 ARM_AFTER_TICKS = 10     # send setpoints this many ticks before arming/switching to offboard
 PX4_CUSTOM_MAIN_MODE_OFFBOARD = 6.0
+CONFIRM_RETRY_TICKS = 10  # how many times to retry a command if not confirmed
+CONFIRM_TIMEOUT_TICKS = 100  # how many ticks to wait for a command to be confirmed
 
 
 class OffboardControl(Node):
@@ -87,19 +90,38 @@ class OffboardControl(Node):
         self.local_position_sub = self.create_subscription(
             VehicleLocalPosition, '/fmu/out/vehicle_local_position_v1', self.on_local_position, qos_profile)
 
+        self.status_sub = self.create_subscription(
+            VehicleStatus, '/fmu/out/vehicle_status', self.on_status, qos_profile)
+
         self.get_logger().info(f'loaded {len(self.waypoints)} waypoints from {waypoints_file}')
 
         self.tick = 0
         self.waypoint_index = 0
         self.current_position = None
         self.landed = False
+        self.status = None
+        self.confirmed_takeoff = False
         # No hold begins until both position and heading are within tolerance.
         self.hold_started_ns = None
 
         self.timer = self.create_timer(0.1, self.on_timer)  # 10 Hz — PX4 expects at least 2 Hz
+        
 
     def on_local_position(self, msg):
         self.current_position = msg
+
+    def on_status(self, msg):
+        self.status = msg
+        # if not self.confirmed_takeoff and msg.nav_state == VehicleStatus.NAV_STATE_AUTO_TAKEOFF:
+        #     self.confirmed_takeoff = True
+
+    def armed_in_offboard(self):
+        status = self.status
+        return (
+            status is not None
+            and status.arming_state == VehicleStatus.ARMING_STATE_ARMED
+            and status.nav_state == VehicleStatus.NAV_STATE_OFFBOARD
+        )
 
     def on_timer(self):
         if self.landed:
@@ -112,14 +134,23 @@ class OffboardControl(Node):
         self.publish_offboard_control_mode()
         self.publish_trajectory_setpoint(self.current_target())
 
-        if self.tick == ARM_AFTER_TICKS:
-            self.arm()
-            self.engage_offboard_mode()
+        if self.tick >= ARM_AFTER_TICKS and not self.confirmed_takeoff:
+            waited = self.tick - ARM_AFTER_TICKS
+            if self.armed_in_offboard():
+                self.confirmed_takeoff = True
+                self.get_logger().info('armed and in offboard mode confirmed')
+            elif waited >= CONFIRM_TIMEOUT_TICKS:
+                self.get_logger().error('failed to confirm takeoff')
+                self.landed = True
+                return
+            elif waited % CONFIRM_RETRY_TICKS == 0:
+                self.arm()
+                self.engage_offboard_mode()
 
         self.tick += 1
-
-        if self.tick > ARM_AFTER_TICKS and self.current_position is not None:
+        if self.confirmed_takeoff and self.current_position is not None:
             self.advance_waypoint_if_reached()
+
 
     def current_target(self):
         return self.waypoints[self.waypoint_index]
