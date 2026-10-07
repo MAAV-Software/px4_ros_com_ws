@@ -107,61 +107,61 @@ The command ends with `[ros2run]: Process exited with failure 1`. That's expecte
 
 ## 3. SITL flight, scored end to end
 
-Flies the node in SITL and scores the log it produces.
+Flies the full 22-waypoint path in SITL and scores the log it produces. The node loads the installed `milestone1_path.yaml` (the `{pos, yaw, hold_s, tests}` format), and the scorer reads the same file, so no temporary path file is needed. If you edit the path YAML, rebuild: the node reads the installed copy.
 
-> **Temporary workaround, until Session 1.** The node can only read plain `[x, y, z]` waypoints. The current `milestone1_path.yaml` uses the new `{pos: ...}` format, so the node can't load it until the node changes from Session 1 are in. Until then, this test replaces the *installed* copy of the path file with a plain version. Your source file in `src/` is not touched, and the next `colcon build` puts the installed copy back.
->
-> This only works if the workspace was built **without** `--symlink-install`. With symlinks, writing to the installed copy would overwrite your source file. Check with `ls -l install/milestone1_singlevehicle/share/milestone1_singlevehicle/resource/`: the file must not show `->`.
+> **Open QGroundControl first.** PX4 refuses to arm with "Preflight Fail: No connection to the GCS" (`Arming denied`), and the node sends its arm command only once, so the flight never starts. Don't work around this by changing `NAV_DLL_ACT`: PX4 saves parameter changes in SITL, so the change persists into later runs.
 
-**Step 1.** Write a plain path file and put it in place of the installed copy:
+**Step 1.** Build and source the workspace:
 
 ```
-cat > /tmp/m1_sitl_square.yaml <<'EOF'
-waypoints:
-  - [0.0, 0.0, -5.0]
-  - [5.0, 0.0, -5.0]
-  - [5.0, 5.0, -5.0]
-  - [0.0, 5.0, -5.0]
-thresholds:
-  sitl: {position_error_m: 0.5, overshoot_m: 0.5, settle_time_s: 3, cross_track_m: 1.0, heading_error_deg: 5, hover_drift_m: 0.2, tilt_max_deg: 45}
-  hitl: {position_error_m: 0.5, overshoot_m: 1.0, settle_time_s: 5, cross_track_m: 2.0, heading_error_deg: 10, hover_drift_m: 1.0, tilt_max_deg: 45}
-EOF
-cp /tmp/m1_sitl_square.yaml ~/px4_ros_com_ws/install/milestone1_singlevehicle/share/milestone1_singlevehicle/resource/milestone1_path.yaml
+cd ~/px4_ros_com_ws
+source /opt/ros/humble/setup.bash
+colcon build --packages-select milestone1_singlevehicle
+source install/setup.bash
 ```
 
-The node ignores the `thresholds` section, and the scorer accepts plain waypoints, so both can use this file.
+**Step 2.** Fly. Pick one:
 
-**Step 2.** Fly:
+*Launch file* (needs a desktop session). It opens the XRCE agent, PX4 SITL (headless) and the node in their own terminals:
 
 ```
 ros2 launch milestone1_singlevehicle offboard_solution.launch.py
 ```
 
-This opens the XRCE agent, PX4 SITL (headless) and the node in their own terminals, so it needs a desktop session. Wait until the node logs `reached final waypoint, landing` and the drone has landed and disarmed. If it never arms, PX4 was still starting: rerun with `launch_sitl:=false`.
+The node waits 20 s for PX4 to boot. If it never arms, PX4 wasn't ready in time: rerun with `launch_sitl:=false`. Add `headless:=false` to show the Gazebo window.
 
-**Step 3.** Score the newest log. PX4 starts a new log at each arming:
+*Manual, three terminals* (also works over SSH or without gnome-terminal):
+
+```
+# Terminal 1
+MicroXRCEAgent udp4 -p 8888
+
+# Terminal 2: wait for "Ready for takeoff!"
+cd ~/PX4-Autopilot && PX4_SYS_AUTOSTART=4001 HEADLESS=1 make px4_sitl gz_x500
+
+# Terminal 3 (workspace sourced as in step 1)
+ros2 launch milestone1_singlevehicle offboard_solution.launch.py launch_sitl:=false
+```
+
+The full path takes about 3 minutes. Wait until the node logs `Final hold complete; landing` and PX4 logs `Disarmed by landing`.
+
+**Step 3.** Score the newest log. PX4 starts a new log at each arming, and the scorer uses the installed path file by default:
 
 ```
 ros2 run milestone1_singlevehicle m1_analyze \
-  "$(ls -t ~/PX4-Autopilot/build/px4_sitl_default/rootfs/fs/log/*/*.ulg | head -1)" \
-  --path /tmp/m1_sitl_square.yaml
+  "$(ls -t ~/PX4-Autopilot/build/px4_sitl_default/rootfs/fs/log/*/*.ulg | head -1)"
 ```
 
 **Expected:**
-- S1, L1 and R1 PASS.
-- 4 legs in the legs table, all `Reached: yes`, with cross-track and tilt values. Overshoot, settle time and position error show `—`, because the node doesn't hold at waypoints yet.
-- No notes about setpoints missing from the path file.
-- These waypoints have no test IDs, so the T rows don't appear in the matrix table. Only S1, L1, R1 and F1 do. That's expected for this temporary file.
-
-**Step 4.** Put the real path file back once you're done with level 4:
-
-```
-cd ~/px4_ros_com_ws && colcon build --packages-select milestone1_singlevehicle
-```
+- F1 is NOT TESTED, because the flight has no offboard-loss failsafe (see level 4).
+- S1, L1, R1, H1 and T1 to T9 PASS, and all 22 legs show `Reached: yes`.
+- Y1 and Y2 currently FAIL: measured heading error is about 14° (Y1) and 8° (Y2) against the 5° SITL limit. Seen on 2026-10-07, cause not yet investigated.
+- T8 sits on its limit: cross-track at waypoint 9 measured 1.00 m and 1.03 m in two runs against a 1.0 m limit, so it can pass or fail between runs.
+- The overall result is therefore FAIL until the yaw issue is fixed.
 
 ## 4. Failsafe and takeover runs
 
-Use the same setup as level 3, with the temporary path file still installed. Restart SITL between runs, so each run takes off from the origin.
+Use the same setup as level 3 (QGroundControl open). Restart SITL between runs, so each run takes off from the origin.
 
 **Failsafe (F1):**
 1. Start the flight as in level 3, step 2.
