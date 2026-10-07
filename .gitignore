@@ -1,3 +1,7 @@
 log/*
 !log/.gitkeep
 archive/
+onboarding/
+build/
+install/
+MISSION_CORE_PLAN.md
