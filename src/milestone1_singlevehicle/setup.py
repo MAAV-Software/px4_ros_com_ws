@@ -16,6 +16,7 @@ setup(
         (os.path.join('share', package_name, 'resource'), glob('resource/*.yaml')),
     ],
     install_requires=['setuptools'],
+    tests_require=['pytest'],
     zip_safe=True,
     maintainer='Amit Sail',
     maintainer_email='theamitsail@gmail.com',
@@ -24,6 +25,7 @@ setup(
     entry_points={
         'console_scripts': [
             'offboard_solution = milestone1_singlevehicle.offboard_control_solution:main',
+            'm1_analyze = milestone1_singlevehicle.analyze_flight:main',
         ],
     },
 )

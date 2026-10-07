@@ -13,7 +13,7 @@ Both use the same metric code and the same configuration, so they should agree.
 
 ## Step 0: save this plan in the package
 
-Copy this plan to `src/milestone1_singlevehicle/flight-scoring-plan.md` as the first step, so it stays in the package folder with the Milestone 1 guide. `milestone-1-single-vehicle.md` stays where it is.
+Copy this plan to `src/milestone1_singlevehicle/documentation/flight-scoring-plan.md` as the first step, so it stays in the package's documentation folder with the Milestone 1 guide.
 
 ## Configuration: `resource/milestone1_path.yaml`
 

@@ -1,6 +1,6 @@
 Re# Milestone 1: 1 Drone Autonomous
 
-**Goal (from [PLAN.md](../../PLAN.md)):** baseline offboard control of a single drone on a single track, validated in sim **and** on one of the 2 old-design drones.
+**Goal (from [PLAN.md](../../../PLAN.md)):** baseline offboard control of a single drone on a single track, validated in sim **and** on one of the 2 old-design drones.
 
 This package is the test for that milestone. It checks freedom of flight and control: can our ROS 2 stack take one drone from the ground, move it in every direction it can be controlled in (see the [test matrix](#freedom-of-flight-test-matrix)) under offboard control, and hand it back to PX4 safely? It runs in two stages:
 
@@ -11,11 +11,11 @@ Pass SITL before you try HITL. Milestone 1 is complete when both stages pass, an
 
 ## What the test flies
 
-[`offboard_control_solution.py`](milestone1_singlevehicle/offboard_control_solution.py) is the week 3 onboarding controller, promoted to the milestone baseline. In order, it:
+[`offboard_control_solution.py`](../milestone1_singlevehicle/offboard_control_solution.py) is the week 3 onboarding controller, promoted to the milestone baseline. In order, it:
 
 1. Streams position setpoints at 10 Hz for 1 s (`ARM_AFTER_TICKS = 10`).
 2. Sends **arm**, then switches PX4 to **offboard** mode.
-3. Takes off to the first waypoint and flies the path in [`resource/milestone1_path.yaml`](resource/milestone1_path.yaml). A waypoint counts as reached within 0.5 m (`ACCEPTANCE_RADIUS`).
+3. Takes off to the first waypoint and flies the path in [`resource/milestone1_path.yaml`](../resource/milestone1_path.yaml). A waypoint counts as reached within 0.5 m (`ACCEPTANCE_RADIUS`).
 4. Sends **land** after the last waypoint and stops streaming setpoints.
 
 Default path, in the local NED frame (metres; x = north, y = east, z = down, so negative z is up):
@@ -147,7 +147,7 @@ ros2 launch milestone1_singlevehicle offboard_solution.launch.py
 
 This launch file:
 
-- Opens the Micro XRCE-DDS Agent and PX4 SITL (`gz_x500`) in their own terminals, using [`px4_sitl.launch.py`](launch/px4_sitl.launch.py).
+- Opens the Micro XRCE-DDS Agent and PX4 SITL (`gz_x500`) in their own terminals, using [`px4_sitl.launch.py`](../launch/px4_sitl.launch.py).
 - Runs Gazebo **headless** (`HEADLESS=1`). The sim runs normally, but no Gazebo window opens. Watch the flight in QGroundControl or the PX4 console.
 - Waits 20 s for SITL to boot, then starts the node in its own terminal.
 
