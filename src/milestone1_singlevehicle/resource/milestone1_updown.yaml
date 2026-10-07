@@ -1,0 +1,22 @@
+waypoints:
+  - {pos: [0.0, 0.0, -5.0], yaw: 0.0, hold_s: 5, tests: [T1]} # 0: Climb
+  - {pos: [0.0, 0.0, 0.0], yaw: 0.0, hold_s: 5, tests: [T2]} # 1: Descend
+
+
+thresholds:
+  sitl:
+    position_error_m: 0.5
+    overshoot_m: 0.5
+    settle_time_s: 3
+    cross_track_m: 1.0
+    heading_error_deg: 5
+    hover_drift_m: 0.2
+    tilt_max_deg: 45
+  hitl:
+    position_error_m: 0.5
+    overshoot_m: 1.0
+    settle_time_s: 5
+    cross_track_m: 2.0
+    heading_error_deg: 10
+    hover_drift_m: 1.0
+    tilt_max_deg: 45
