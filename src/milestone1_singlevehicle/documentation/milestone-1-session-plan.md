@@ -21,7 +21,7 @@ Related docs:
 
 ## The test path
 
-One path covers every in-scope row. It stays inside a 5 m × 5 m square at 3–6 m altitude, so the guide's 15 m × 15 m HITL area still applies. Yaw is in degrees in the NED frame: 0 = north, 90 = east (clockwise seen from above).
+One path covers every in-scope row. It stays inside a 5 m × 5 m square at 3–6 m altitude, so the guide's 15 m × 15 m HITL area still applies. Yaw is in radians in the NED frame, as in the YAML and PX4: 0 = north, π/2 = east (clockwise seen from above). The table below shows degrees for readability.
 
 | # | x | y | z | Yaw | Hold (s) | Tests |
 |---|---|---|---|---|---|---|
@@ -77,7 +77,7 @@ In pairs, in `offboard_control_solution.py` and the launch file:
 
 | Pair | Change |
 |---|---|
-| A | **Yaw and hold.** Read `yaw` (degrees) and `hold_s` per waypoint. Send yaw in `TrajectorySetpoint.yaw`, converted to radians. A waypoint is reached when the drone is within 0.5 m **and** its heading (`VehicleLocalPosition.heading`) is within 5°. The node then holds there for `hold_s` before moving on. |
+| A | **Yaw and hold.** Read `yaw` (radians) and `hold_s` per waypoint. Send yaw in `TrajectorySetpoint.yaw` as is. A waypoint is reached when the drone is within 0.5 m **and** its heading (`VehicleLocalPosition.heading`) is within 5°. The node then holds there for `hold_s` before moving on. |
 | B | **S1 and path selection.** Subscribe to `vehicle_status` again. Resend arm and offboard once per second until the drone reports armed and in Offboard mode. Log the confirmation. If it isn't confirmed after 10 s, log an error and stop. Add a `path_file` parameter (default `milestone1_path.yaml`) and a matching `path` launch argument. |
 
 Both changes are in the same file, so pair B rebases on pair A's change before the review.
