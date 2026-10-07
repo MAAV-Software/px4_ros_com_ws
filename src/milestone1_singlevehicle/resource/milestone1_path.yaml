@@ -1,5 +1,6 @@
+# Waypoint yaw is in radians (0=north, pi/2=east).
 waypoints:
-  - {pos: [0.0, 0.0, -5.0], yaw: 0,   hold_s: 5,  tests: [T1]}
+  - {pos: [0.0, 0.0, -5.0], yaw: 0.0,   hold_s: 5,  tests: [T1]}
 
 
 thresholds:

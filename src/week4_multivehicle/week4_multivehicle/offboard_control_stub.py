@@ -86,8 +86,14 @@ class OffboardControl(Node):
         TODO(task 3): instance 0 should return the bare topic, e.g.
         '/fmu/out/vehicle_status_v1'. Instance N (N != 0) should be prefixed
         with px4_N, e.g. '/px4_1/fmu/out/vehicle_status_v1'.
+    
         """
-        raise NotImplementedError('topic() is not implemented yet — see the TODO above')
+        if self.vehicle_instance == 0:
+                return f'/{suffix}'
+        return f'/px4_{self.vehicle_instance}/{suffix}'
+
+        
+
 
     def on_status(self, msg):
         self.vehicle_status = msg
@@ -153,7 +159,7 @@ class OffboardControl(Node):
         msg.command = command
         msg.param1 = param1
         msg.param2 = param2
-        msg.target_system = 1
+        msg.target_system = 1 + self.vehicle_instance
         msg.target_component = 1
         msg.source_system = 1
         msg.source_component = 1

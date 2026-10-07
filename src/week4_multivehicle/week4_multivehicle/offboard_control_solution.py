@@ -11,11 +11,14 @@ PX4-Autopilot — instance 0 gets no prefix, instance N gets "px4_N"). That's
 the exact rule `topic()` below implements.
 
 Usage:
-  ros2 run week4_multivehicle offboard_solution --ros-args -p vehicle_instance:=1
+  ros2 run week4_multivehicle offboard_solution --ros-args -p vehicle_instance:=0 \
+    -p waypoints_file:=/absolute/path/to/waypoints.yaml
 or via the provided launch file:
   ros2 launch week4_multivehicle offboard_solution.launch.py instance:=1
 """
 import rclpy
+import math
+import yaml
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSDurabilityPolicy, QoSHistoryPolicy
 
@@ -27,12 +30,6 @@ from px4_msgs.msg import (
     VehicleLocalPosition,
 )
 
-WAYPOINTS = [
-    (0.0, 0.0, -5.0),
-    (5.0, 0.0, -5.0),
-    (5.0, 5.0, -5.0),
-    (0.0, 5.0, -5.0),
-]
 ACCEPTANCE_RADIUS = 0.5
 ARM_AFTER_TICKS = 10
 PX4_CUSTOM_MAIN_MODE_OFFBOARD = 6.0
@@ -41,10 +38,41 @@ PX4_CUSTOM_MAIN_MODE_OFFBOARD = 6.0
 class OffboardControl(Node):
     def __init__(self):
         super().__init__('offboard_control_solution')
+        self.declare_parameter("waypoints_file", "")
+        waypoints_file = self.get_parameter("waypoints_file").value
+
+        if not waypoints_file:
+            raise ValueError("Provide the waypoints_file ROS parameter")
+
+        with open(waypoints_file, "r") as file:
+            data = yaml.safe_load(file)
+
+        # YAML yaw is already in radians, matching PX4.
+        self.waypoints = [
+            {
+                'pos': tuple(float(v) for v in waypoint['pos']),
+                'yaw': float(waypoint['yaw']),
+                'hold_s': float(waypoint['hold_s']),
+            }
+            for waypoint in data['waypoints']
+        ]
+
+        if not self.waypoints:
+            raise ValueError('The path must contain at least one waypoint')
+        for waypoint in self.waypoints:
+            if (
+                len(waypoint['pos']) != 3
+                or not all(math.isfinite(v) for v in waypoint['pos'])
+                or not math.isfinite(waypoint['yaw'])
+                or not math.isfinite(waypoint['hold_s'])
+                or waypoint['hold_s'] < 0
+            ):
+                raise ValueError('Invalid waypoint position, yaw, or hold_s')
 
         self.declare_parameter('vehicle_instance', 1)
         self.vehicle_instance = self.get_parameter('vehicle_instance').value
         self.get_logger().info(f'targeting vehicle instance {self.vehicle_instance}')
+
 
         qos_profile = QoSProfile(
             reliability=QoSReliabilityPolicy.BEST_EFFORT,
@@ -73,6 +101,8 @@ class OffboardControl(Node):
         self.vehicle_status = VehicleStatus()
         self.current_position = None
         self.landed = False
+        # No hold begins until both position and heading are within tolerance.
+        self.hold_started_ns = None
 
         self.timer = self.create_timer(0.1, self.on_timer)
 
@@ -110,25 +140,58 @@ class OffboardControl(Node):
             self.advance_waypoint_if_reached()
 
     def current_target(self):
-        return WAYPOINTS[self.waypoint_index]
+        return self.waypoints[self.waypoint_index]
+
 
     def advance_waypoint_if_reached(self):
-        tx, ty, tz = self.current_target()
-        dx = self.current_position.x - tx
-        dy = self.current_position.y - ty
-        dz = self.current_position.z - tz
-        distance = (dx ** 2 + dy ** 2 + dz ** 2) ** 0.5
-
-        if distance >= ACCEPTANCE_RADIUS:
+        target = self.current_target()
+        position = self.current_position
+        if position is None or not position.xy_valid or not position.z_valid:
+            self.hold_started_ns = None
             return
 
-        if self.waypoint_index < len(WAYPOINTS) - 1:
+        tx, ty, tz = target['pos']
+        distance = math.sqrt(
+            (position.x - tx) ** 2
+            + (position.y - ty) ** 2
+            + (position.z - tz) ** 2
+        )
+        # Wrap across +/-180 degrees: 179 to -179 is a 2-degree error.
+        yaw_difference = target['yaw'] - position.heading
+        heading_error = abs(math.atan2(
+            math.sin(yaw_difference), math.cos(yaw_difference)))
+        reached = (
+            math.isfinite(distance)
+            and math.isfinite(heading_error)
+            and distance <= ACCEPTANCE_RADIUS
+            and heading_error <= math.radians(5.0)
+        )
+        if not reached:
+            # The hold must be continuous; leaving either tolerance resets it.
+            self.hold_started_ns = None
+            return
+
+        now_ns = self.get_clock().now().nanoseconds
+        if self.hold_started_ns is None or now_ns < self.hold_started_ns:
+            self.hold_started_ns = now_ns
+            self.get_logger().info(
+                f'Waypoint {self.waypoint_index} reached; '
+                f'holding for {target["hold_s"]} seconds')
+
+        # on_timer continues sending this position and yaw during the hold.
+        elapsed_s = (now_ns - self.hold_started_ns) / 1e9
+        if elapsed_s < target['hold_s']:
+            return
+
+        self.hold_started_ns = None
+        if self.waypoint_index < len(self.waypoints) - 1:
             self.waypoint_index += 1
             self.get_logger().info(
-                f'vehicle {self.vehicle_instance}: reached waypoint {self.waypoint_index - 1}, '
-                f'advancing to {self.waypoint_index}')
+                f'vehicle {self.vehicle_instance}: advancing to '
+                f'waypoint {self.waypoint_index}')
         else:
-            self.get_logger().info(f'vehicle {self.vehicle_instance}: reached final waypoint, landing')
+            # Finish the last hold before requesting landing.
+            self.get_logger().info('Final hold complete; landing')
             self.land()
             self.landed = True
 
@@ -140,8 +203,9 @@ class OffboardControl(Node):
 
     def publish_trajectory_setpoint(self, target):
         msg = TrajectorySetpoint()
-        msg.position = [float(target[0]), float(target[1]), float(target[2])]
-        msg.yaw = 0.0
+        msg.position = list(target['pos'])
+        # Send the yaw in radians directly from the YAML.
+        msg.yaw = target['yaw']
         msg.timestamp = int(self.get_clock().now().nanoseconds / 1000)
         self.trajectory_setpoint_pub.publish(msg)
 
@@ -150,7 +214,8 @@ class OffboardControl(Node):
         msg.command = command
         msg.param1 = param1
         msg.param2 = param2
-        msg.target_system = 1
+        # PX4 SITL assigns MAV_SYS_ID = instance + 1 in its startup script.
+        msg.target_system = 1 + self.vehicle_instance
         msg.target_component = 1
         msg.source_system = 1
         msg.source_component = 1
