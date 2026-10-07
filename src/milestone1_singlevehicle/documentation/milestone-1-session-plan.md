@@ -78,7 +78,7 @@ In pairs, in `offboard_control_solution.py` and the launch file:
 | Pair | Change |
 |---|---|
 | A | **Yaw and hold.** Read `yaw` (radians) and `hold_s` per waypoint. Send yaw in `TrajectorySetpoint.yaw` as is. A waypoint is reached when the drone is within 0.5 m **and** its heading (`VehicleLocalPosition.heading`) is within 5°. The node then holds there for `hold_s` before moving on. |
-| B | **S1 and path selection.** Subscribe to `vehicle_status` again. Resend arm and offboard once per second until the drone reports armed and in Offboard mode. Log the confirmation. If it isn't confirmed after 10 s, log an error and stop. Add a `path_file` parameter (default `milestone1_path.yaml`) and a matching `path` launch argument. |
+| B | **S1 and path selection.** Subscribe to `vehicle_status` again. Resend arm and offboard once per second until the drone reports armed and in Offboard mode. Log the confirmation. If it isn't confirmed after 5 s, log an error and stop. This matches `m1_analyze`, which fails S1 if arming to Offboard takes more than 5 s. Add a `path_file` parameter (default `milestone1_path.yaml`) and a matching `path` launch argument. |
 
 Both changes are in the same file, so pair B rebases on pair A's change before the review.
 
