@@ -1,3 +1,4 @@
+# Smallest Milestone 1 test: climb to 5 m, then descend.
 waypoints:
   - {pos: [0.0, 0.0, -5.0], yaw: 0.0, hold_s: 5, tests: [T1]} # 0: Climb
   - {pos: [0.0, 0.0, 0.0], yaw: 0.0, hold_s: 5, tests: [T2]} # 1: Descend

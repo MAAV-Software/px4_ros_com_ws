@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Launch the milestone 1 offboard node on the 4-waypoint square path.
+"""Launch the milestone 1 offboard node on the square path: climb, a 5 m square, then descend.
 
 Same as offboard_solution.launch.py (and takes the same launch_sitl, headless
 and path arguments), with a different default waypoint file.
