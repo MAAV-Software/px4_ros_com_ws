@@ -253,3 +253,22 @@ def test_report_formats():
     assert '| 2026-10-06 | HITL | PX4_SITL abc | path.yaml |' in markdown
     data = scoring.report_to_dict(report, meta)
     assert data['overall'] == 'PASS' and data['rows']['T1']['status'] == 'PASS'
+
+
+def test_yaw_ramp_steps_are_folded_into_their_waypoint_segment():
+    # Waypoints 1 and 2 share a position; the node ramps the yaw into waypoint 2,
+    # so its setpoint yaw changes every tick (0.2 s apart) before it settles.
+    a, b = [0, 0, -5], [5, 0, -5]
+    flight = make_flight([a, b, b])
+    leg2_start = 1.0 + 2 * 8.0
+    ramp = [(leg2_start + 0.2 * k, 0.1 * (k + 1)) for k in range(5)]
+    for t, yaw in ramp:
+        flight.sp_yaw[np.isclose(flight.sp_t, t)] = yaw
+    flight.sp_yaw[flight.sp_t >= leg2_start + 1.0] = 0.5
+
+    segments = scoring.setpoint_segments(flight)
+
+    assert len(segments) == 3
+    assert segments[2].start == pytest.approx(leg2_start)
+    assert segments[2].yaw == pytest.approx(0.5)
+    assert segments[1].end == pytest.approx(leg2_start)

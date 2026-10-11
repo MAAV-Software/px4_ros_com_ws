@@ -9,7 +9,7 @@ No ROS or pyulog imports: analyze_flight.py feeds this from a .ulg log, and the
 unit tests feed it made-up data.
 """
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import numpy as np
 import yaml
@@ -22,6 +22,7 @@ ACCEPTANCE_YAW_DEG = 5.0
 # How close a logged setpoint must be to a path waypoint to count as that waypoint.
 SETPOINT_MATCH_M = 0.1
 SETPOINT_MATCH_YAW_DEG = 1.0
+YAW_RAMP_STEP_MAX_S = 0.5  # a setpoint this short, at the next one's position, is a step of the node's yaw ramp
 
 POSITION_ERROR_WINDOW_S = 1.0  # position error = mean over this much of the end of the leg
 MIN_POST_ARRIVAL_S = 0.5       # less time than this at the waypoint: overshoot/settle can't be measured
@@ -233,15 +234,36 @@ def setpoint_segments(flight):
         changed[1:] = (np.linalg.norm(np.diff(pos, axis=0), axis=1) > 1e-3) | (yaw_step > 1e-3)
         starts = np.flatnonzero(changed)
 
+        interval = []
         for k, i in enumerate(starts):
             last = k == len(starts) - 1
-            segments.append(Segment(
+            interval.append(Segment(
                 start=float(t[i]),
                 end=float(end if last else t[starts[k + 1]]),
                 pos=pos[i],
                 yaw=float(yaw[i]),
                 ended_by=_how_offboard_ended(flight, end) if last else 'next'))
+        segments.extend(_merge_yaw_ramps(interval))
     return segments
+
+
+def _merge_yaw_ramps(segments):
+    """Fold yaw-ramp steps into the segment they lead to.
+
+    The node ramps its commanded yaw toward the waypoint's yaw, so the logged
+    setpoint yaw changes every tick until it arrives. Each step is a very
+    short segment at the same position as the one after it. Without this they
+    would all be reported as setpoints missing from the path file, and the
+    turn itself would fall outside every leg."""
+    merged, last_step_s = [], None
+    for segment in segments:
+        step_s = segment.end - segment.start
+        if (merged and merged[-1].ended_by == 'next' and last_step_s <= YAW_RAMP_STEP_MAX_S
+                and np.linalg.norm(merged[-1].pos - segment.pos) <= 1e-3):
+            segment = replace(segment, start=merged.pop().start)
+        merged.append(segment)
+        last_step_s = step_s
+    return merged
 
 
 def _matches(segment, waypoint):
