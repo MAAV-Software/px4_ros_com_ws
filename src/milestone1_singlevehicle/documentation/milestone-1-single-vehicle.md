@@ -151,18 +151,20 @@ ros2 launch milestone1_singlevehicle offboard_solution.launch.py
 
 This launch file:
 
-- Opens the Micro XRCE-DDS Agent and PX4 SITL (`gz_x500`) in their own terminals, using [`px4_sitl.launch.py`](../launch/px4_sitl.launch.py).
+- Starts the Micro XRCE-DDS Agent and PX4 SITL (`gz_x500`) as background processes (output in `~/.ros/log/latest/launch.log`), using [`px4_sitl.launch.py`](../launch/px4_sitl.launch.py), with the agreed speed limits set as PX4 parameters.
 - Runs Gazebo **headless** (`HEADLESS=1`). The sim runs normally, but no Gazebo window opens. Watch the flight in QGroundControl or the PX4 console.
-- Waits 20 s for SITL to boot, then starts the node in its own terminal.
+- Waits until PX4 has a valid local position (up to 5 minutes), then starts the node. The node resends arm and offboard until PX4 accepts both, and stops with an error after 30 s. Open QGroundControl first, or PX4 refuses to arm.
+- `Ctrl-C` stops the node, PX4, Gazebo and the agent.
 
 Options:
 
 | Argument | Default | Use |
 |---|---|---|
 | `headless:=false` | `true` | Open the Gazebo GUI to watch the drone |
-| `launch_sitl:=false` | `true` | SITL + agent already running; start only the node, immediately |
+| `launch_sitl:=false` | `true` | SITL + agent already running; start only the node (still waits for PX4 to be ready) |
+| `path:=<file>` | `milestone1_path.yaml` | Waypoint YAML (yaw in radians) |
 
-If the drone never arms on the first run, PX4 was probably still building or booting. Leave SITL up and rerun with `launch_sitl:=false`.
+If the drone never arms, check that QGroundControl is open and look at the node's log lines (`PX4 did not accept command ...`).
 
 SITL alone (no node) is also available: `ros2 launch milestone1_singlevehicle px4_sitl.launch.py [headless:=false]`.
 
