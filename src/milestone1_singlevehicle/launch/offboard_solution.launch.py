@@ -1,15 +1,18 @@
 #!/usr/bin/env python
 """Launch the milestone 1 offboard control node, optionally bringing up PX4
-SITL + the Micro XRCE-DDS Agent (px4_sitl.launch.py) first — each in its own
-terminal. Gazebo runs headless (no GUI window) unless headless:=false.
+SITL + the Micro XRCE-DDS Agent (px4_sitl.launch.py) first. Gazebo runs
+headless (no GUI window) unless headless:=false.
+
+The node is started only once PX4 reports a valid position
+a valid local position estimate (m1_wait_ready), not after a fixed delay, so it works the
+same whether SITL was just started, is already running, or is a real drone.
 
 Usage:
   # SITL/agent not running yet — bring them up too, then the solution node:
   ros2 launch milestone1_singlevehicle offboard_solution.launch.py
 
-  # SITL/agent already running (e.g. you brought them up by hand per the
-  # "Before starting" step) — just the solution node, so you don't spin up a
-  # second conflicting SITL/Gazebo instance:
+  # SITL/agent already running (or a real drone over the XRCE agent) — just
+  # the solution node, so you don't spin up a second conflicting instance:
   ros2 launch milestone1_singlevehicle offboard_solution.launch.py launch_sitl:=false
 
   # Show the Gazebo GUI instead of running headless:
@@ -22,19 +25,21 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, TimerAction
-from launch.conditions import IfCondition, UnlessCondition
+from launch.actions import (
+    DeclareLaunchArgument, EmitEvent, IncludeLaunchDescription,
+    LogInfo, RegisterEventHandler)
+from launch.conditions import IfCondition
+from launch.event_handlers import OnProcessExit
+from launch.events import Shutdown
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.substitutions import FindPackageShare
 
-# PX4 SITL + Gazebo can take a while to build and boot, especially the first
-# time — give it a head start before the offboard node begins streaming
-# setpoints. If it still isn't armed/flying, PX4 wasn't up in time; just
-# rerun this launch file (with launch_sitl:=false, since SITL is up by now).
-SITL_STARTUP_DELAY = 20.0
+# How long to wait for PX4 to become ready. The first start after a build
+# (PX4 + Gazebo compile) can take minutes.
+READY_TIMEOUT_S = 300
 
 
 def generate_launch_description():
@@ -42,7 +47,6 @@ def generate_launch_description():
         'launch_sitl', default_value='true',
         description='Also launch PX4 SITL + the XRCE agent (px4_sitl.launch.py). '
                      'Set to false if they are already running.')
-    launch_sitl = LaunchConfiguration('launch_sitl')
 
     headless_arg = DeclareLaunchArgument(
         'headless', default_value='true',
@@ -56,43 +60,42 @@ def generate_launch_description():
             'milestone1_path.yaml',
         ]),
         description='Waypoint YAML file (yaw in radians)')
-    waypoints_parameters = [{
-        'waypoints_file': ParameterValue(LaunchConfiguration('path'), value_type=str),
-    }]
 
     sitl_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(get_package_share_directory('milestone1_singlevehicle'), 'px4_sitl.launch.py')),
         launch_arguments={'headless': LaunchConfiguration('headless')}.items(),
-        condition=IfCondition(launch_sitl))
+        condition=IfCondition(LaunchConfiguration('launch_sitl')))
 
-    # We launched SITL ourselves — wait for it to boot before streaming setpoints.
-    delayed_offboard_node = TimerAction(
-        period=SITL_STARTUP_DELAY,
-        actions=[
-            Node(
-                package='milestone1_singlevehicle',
-                executable='offboard_solution',
-                name='offboard_control_solution',
-                parameters=waypoints_parameters,
-                prefix='gnome-terminal --'),
-        ],
-        condition=IfCondition(launch_sitl))
+    # Exits 0 once PX4 is ready (immediately, if it already is), 1 on timeout.
+    wait_ready = Node(
+        package='milestone1_singlevehicle',
+        executable='m1_wait_ready',
+        name='m1_wait_ready',
+        arguments=['--timeout', str(READY_TIMEOUT_S)],
+        output='screen')
 
-    # SITL was already running — start immediately, no delay needed.
-    immediate_offboard_node = Node(
+    offboard_node = Node(
         package='milestone1_singlevehicle',
         executable='offboard_solution',
         name='offboard_control_solution',
-        parameters=waypoints_parameters,
-        prefix='gnome-terminal --',
-        condition=UnlessCondition(launch_sitl))
+        parameters=[{
+            'waypoints_file': ParameterValue(LaunchConfiguration('path'), value_type=str),
+        }],
+        output='screen')
+
+    def start_node_when_ready(event, context):
+        if event.returncode == 0:
+            return [offboard_node]
+        return [LogInfo(msg='PX4 never became ready; not starting the offboard node.'),
+                EmitEvent(event=Shutdown(reason='PX4 not ready'))]
 
     return LaunchDescription([
         launch_sitl_arg,
         headless_arg,
         path_arg,
         sitl_launch,
-        delayed_offboard_node,
-        immediate_offboard_node,
+        wait_ready,
+        RegisterEventHandler(OnProcessExit(
+            target_action=wait_ready, on_exit=start_node_when_ready)),
     ])

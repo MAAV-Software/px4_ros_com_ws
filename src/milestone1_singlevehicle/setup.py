@@ -26,6 +26,7 @@ setup(
         'console_scripts': [
             'offboard_solution = milestone1_singlevehicle.offboard_control_solution:main',
             'm1_analyze = milestone1_singlevehicle.analyze_flight:main',
+            'm1_wait_ready = milestone1_singlevehicle.wait_for_px4:main',
         ],
     },
 )

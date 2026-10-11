@@ -109,7 +109,7 @@ The command ends with `[ros2run]: Process exited with failure 1`. That's expecte
 
 Flies the full 22-waypoint path in SITL and scores the log it produces. The node loads the installed `milestone1_path.yaml` (the `{pos, yaw, hold_s, tests}` format), and the scorer reads the same file, so no temporary path file is needed. If you edit the path YAML, rebuild: the node reads the installed copy.
 
-> **Open QGroundControl first.** PX4 refuses to arm with "Preflight Fail: No connection to the GCS" (`Arming denied`), and the node sends its arm command only once, so the flight never starts. Don't work around this by changing `NAV_DLL_ACT`: PX4 saves parameter changes in SITL, so the change persists into later runs.
+> **Open QGroundControl first.** PX4 refuses to arm with "Preflight Fail: No connection to the GCS" (`Arming denied`), and the flight never starts: the node retries arming for 30 s, then stops with an error that names this. Don't work around this by changing `NAV_DLL_ACT`: PX4 saves parameter changes in SITL, so the change persists into later runs.
 
 **Step 1.** Build and source the workspace:
 
@@ -122,13 +122,13 @@ source install/setup.bash
 
 **Step 2.** Fly. Pick one:
 
-*Launch file* (needs a desktop session). It opens the XRCE agent, PX4 SITL (headless) and the node in their own terminals:
+*Launch file* (works over SSH; no extra terminal windows). It starts the XRCE agent and PX4 SITL (headless) in the background, waits until PX4 has a valid position, then starts the node. PX4 and agent output goes to `~/.ros/log/latest/launch.log`:
 
 ```
 ros2 launch milestone1_singlevehicle offboard_solution.launch.py
 ```
 
-The node waits 20 s for PX4 to boot. If it never arms, PX4 wasn't ready in time: rerun with `launch_sitl:=false`. Add `headless:=false` to show the Gazebo window.
+The launch file applies the agreed speed limits as PX4 parameters (they persist between runs in SITL). It waits up to 5 minutes for PX4 to be ready; the node then retries arm and offboard until PX4 accepts both. `Ctrl-C` stops everything, including PX4, Gazebo and the agent. Add `headless:=false` to show the Gazebo window. `square_launch.py` and `updown_launch.py` take the same arguments with a different default path.
 
 *Manual, three terminals* (also works over SSH or without gnome-terminal):
 

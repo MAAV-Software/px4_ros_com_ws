@@ -18,6 +18,7 @@ import math
 
 import rclpy
 import yaml
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSDurabilityPolicy, QoSHistoryPolicy
 
@@ -25,12 +26,15 @@ from px4_msgs.msg import (
     OffboardControlMode,
     TrajectorySetpoint,
     VehicleCommand,
+    VehicleCommandAck,
     VehicleLocalPosition,
 )
 
 ACCEPTANCE_RADIUS = 0.5  # metres — how close counts as "reached" a waypoint
 ARM_AFTER_TICKS = 10     # send setpoints this many ticks before arming/switching to offboard
 PX4_CUSTOM_MAIN_MODE_OFFBOARD = 6.0
+CONFIRM_RETRY_TICKS = 10     # resend arm + offboard this often until PX4 reports both
+CONFIRM_TIMEOUT_TICKS = 300  # give up if arm + offboard still aren't accepted after this many ticks
 # Matches the MPC_YAWRAUTO_MAX agreed for these tests. Ramping the commanded
 # yaw at this rate, instead of stepping straight to the target, keeps PX4's
 # attitude controller from overshooting on a large yaw change.
@@ -91,11 +95,21 @@ class OffboardControl(Node):
         self.local_position_sub = self.create_subscription(
             VehicleLocalPosition, '/fmu/out/vehicle_local_position_v1', self.on_local_position, qos_profile)
 
+        # PX4 answers every command with an ack. (VehicleStatus and
+        # VehicleControlMode would show armed/offboard directly, but the
+        # px4_msgs in this workspace is older than this PX4 build's versions
+        # of them, so they can't be read reliably.)
+        self.ack_sub = self.create_subscription(
+            VehicleCommandAck, '/fmu/out/vehicle_command_ack_v1', self.on_ack, qos_profile)
+
         self.get_logger().info(f'loaded {len(self.waypoints)} waypoints from {waypoints_file}')
 
         self.tick = 0
         self.waypoint_index = 0
         self.current_position = None
+        self.arm_accepted = False
+        self.offboard_accepted = False
+        self.confirmed_offboard = False
         self.landed = False
         # No hold begins until both position and heading are within tolerance.
         self.hold_started_ns = None
@@ -108,6 +122,15 @@ class OffboardControl(Node):
     def on_local_position(self, msg):
         self.current_position = msg
 
+    def on_ack(self, msg):
+        accepted = msg.result == VehicleCommandAck.VEHICLE_CMD_RESULT_ACCEPTED
+        if msg.command == VehicleCommand.VEHICLE_CMD_COMPONENT_ARM_DISARM:
+            self.arm_accepted = accepted
+        elif msg.command == VehicleCommand.VEHICLE_CMD_DO_SET_MODE:
+            self.offboard_accepted = accepted
+        if not accepted:
+            self.get_logger().warn(f'PX4 did not accept command {msg.command} (result {msg.result}); will retry')
+
     def on_timer(self):
         if self.landed:
             return
@@ -119,13 +142,27 @@ class OffboardControl(Node):
         self.publish_offboard_control_mode()
         self.publish_trajectory_setpoint(self.current_target())
 
-        if self.tick == ARM_AFTER_TICKS:
-            self.arm()
-            self.engage_offboard_mode()
+        # Keep asking until PX4 accepts both arm and offboard: a single command
+        # is lost if PX4 isn't ready yet or refuses to arm.
+        if self.tick >= ARM_AFTER_TICKS and not self.confirmed_offboard:
+            waited = self.tick - ARM_AFTER_TICKS
+            if self.arm_accepted and self.offboard_accepted:
+                self.confirmed_offboard = True
+                self.get_logger().info('arm and offboard mode accepted by PX4')
+            elif waited >= CONFIRM_TIMEOUT_TICKS:
+                self.get_logger().error(
+                    'PX4 did not accept arm + offboard within '
+                    f'{CONFIRM_TIMEOUT_TICKS / 10:.0f} s; giving up '
+                    '(check PX4 preflight checks / GCS connection)')
+                self.landed = True
+                return
+            elif waited % CONFIRM_RETRY_TICKS == 0:
+                self.arm()
+                self.engage_offboard_mode()
 
         self.tick += 1
 
-        if self.tick > ARM_AFTER_TICKS and self.current_position is not None:
+        if self.confirmed_offboard and self.current_position is not None:
             self.advance_waypoint_if_reached()
 
     def current_target(self):
@@ -240,9 +277,12 @@ class OffboardControl(Node):
 def main():
     rclpy.init()
     node = OffboardControl()
-    rclpy.spin(node)
+    try:
+        rclpy.spin(node)
+    except (KeyboardInterrupt, ExternalShutdownException):
+        pass  # Ctrl-C / launch shutdown: stop quietly
     node.destroy_node()
-    rclpy.shutdown()
+    rclpy.try_shutdown()
 
 
 if __name__ == '__main__':
