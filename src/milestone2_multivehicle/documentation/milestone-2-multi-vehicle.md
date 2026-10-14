@@ -5,6 +5,12 @@ and the pass criteria) and the [session plan](#session-plan). Scoring and test
 commands are in [`testing.md`](testing.md). Changes from milestone 1 are in
 [`milestone1-to-milestone2-review.md`](milestone1-to-milestone2-review.md).
 
+# ChatGPT Convo Link
+The link below shows how this folder was created and includes the troubleshooting as well as simply useful information on how to run multivehicle control, testing, and proposed changes
+
+https://chatgpt.com/share/6aced206-28c4-83e9-87f0-b1d230a309df
+
+
 ## Test guide
 
 **Goal (from [PLAN.md](../../../PLAN.md)):** independent multi-vehicle SITL
