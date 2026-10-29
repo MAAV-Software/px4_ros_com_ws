@@ -1,0 +1,6 @@
+# Instance 1, default world origin (20, 0). Local North/East/Down.
+# Pass west 3 m north of instance 0. World XY: (20,3) -> (-10,3).
+# Maintain a lateral offset for initial reactive-policy validation.
+waypoints:
+  - {pos: [3, 0, -5], yaw: 0.0, hold_s: 5.0}
+  - {pos: [3, -30, -5], yaw: 0.0, hold_s: 5.0}
