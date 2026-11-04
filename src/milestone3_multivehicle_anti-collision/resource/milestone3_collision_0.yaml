@@ -1,0 +1,6 @@
+# Instance 0, default world origin (0, 0). Local North/East/Down, yaw radians.
+# Hover while instance 1 passes within 5 m; interrupted holds restart.
+# Control-only demo: assess A1-A8 from the common ROS bag, not m3_analyze.
+waypoints:
+  - {pos: [0, 0, -5], yaw: 0.0, hold_s: 35.0}
+  - {pos: [5, 0, -5], yaw: 0.0, hold_s: 5.0}
