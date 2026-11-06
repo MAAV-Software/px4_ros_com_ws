@@ -5,3 +5,9 @@ onboarding/
 build/
 install/
 MISSION_CORE_PLAN.md
+# Editor, OS and Python files that don't belong in the repo
+.DS_Store
+__pycache__/
+*.pyc
+.vscode/
+.claude/worktrees/
