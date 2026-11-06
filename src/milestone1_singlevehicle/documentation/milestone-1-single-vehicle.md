@@ -193,7 +193,9 @@ Record each run in the [results log](#results-log).
 
 Fly the same node, unmodified, on one of the 2 old-design drones. The goal is to show that what passed in SITL behaves the same on hardware.
 
-> **Safety: read before every flight.** The node **arms the drone ~1 s after it starts**, without checking anything first. Only start it when the drone is in position, the area is clear, and the safety pilot is ready. There's no failure recovery in the code. The RC safety pilot and PX4's own failsafes are the only protection.
+> **Full step-by-step checklist: [`hitl-runbook.md`](hitl-runbook.md).** Use it for every bench and field session.
+>
+> **Safety: read before every flight.** The node **arms the drone ~1 s after it starts** (`arm_delay_s:=N` adds a warning delay), once PX4 has a valid position within 2 m (x/y) of the first waypoint. Only start it when the drone is in position, the area is clear, and the safety pilot is ready. There's no failure recovery in the code. The RC safety pilot and PX4's own failsafes are the only protection.
 
 #### Before the flight
 

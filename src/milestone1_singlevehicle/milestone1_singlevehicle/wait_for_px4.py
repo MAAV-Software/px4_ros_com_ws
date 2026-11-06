@@ -5,7 +5,7 @@ Used by the launch file to start the offboard node only once PX4 is publishing
 a valid local position estimate, instead of guessing with a fixed delay. (If
 PX4 still refuses to arm at that point, the offboard node keeps retrying.)
 
-  ros2 run milestone1_singlevehicle m1_wait_ready [--timeout 180]
+  ros2 run milestone1_singlevehicle m1_wait_ready [--timeout 180] [--topic-prefix /px4_1]
 """
 import argparse
 import sys
@@ -17,9 +17,11 @@ from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSDurabilityPolicy, QoS
 
 from px4_msgs.msg import VehicleLocalPosition
 
+from milestone1_singlevehicle.preflight import position_problem
+
 
 class WaitForPx4(Node):
-    def __init__(self):
+    def __init__(self, prefix=''):
         super().__init__('m1_wait_ready')
         qos = QoSProfile(
             reliability=QoSReliabilityPolicy.BEST_EFFORT,
@@ -28,25 +30,23 @@ class WaitForPx4(Node):
             depth=1)
         self.position = None
         self.create_subscription(
-            VehicleLocalPosition, '/fmu/out/vehicle_local_position_v1',
+            VehicleLocalPosition, f'{prefix}/fmu/out/vehicle_local_position_v1',
             lambda msg: setattr(self, 'position', msg), qos)
 
     def missing(self):
         """What PX4 is still waiting on, or '' when it is ready."""
-        if self.position is None:
-            return 'no vehicle_local_position yet (is PX4 up and the XRCE agent connected?)'
-        if not (self.position.xy_valid and self.position.z_valid):
-            return 'no valid local position estimate yet'
-        return ''
+        return position_problem(self.position)
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--timeout', type=float, default=180.0, help='seconds to wait')
+    parser.add_argument('--topic-prefix', default='',
+                        help="PX4 topic prefix, e.g. /px4_1 for /px4_1/fmu/... (default: none)")
     args, ros_args = parser.parse_known_args()
 
     rclpy.init(args=ros_args)
-    node = WaitForPx4()
+    node = WaitForPx4(args.topic_prefix.rstrip('/'))
     deadline = time.monotonic() + args.timeout
     last_report = 0.0
     reason = 'waiting'

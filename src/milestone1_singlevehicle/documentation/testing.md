@@ -38,7 +38,7 @@ colcon test --packages-select milestone1_singlevehicle
 colcon test-result --verbose
 ```
 
-**Expected:** `22 tests, 0 errors, 0 failures, 0 skipped`.
+**Expected:** `32 tests, 0 errors, 0 failures, 0 skipped` (22 in `test_scoring.py`, 10 in `test_preflight.py`).
 
 The tests are in [`test/test_scoring.py`](../test/test_scoring.py). They feed made-up flights with known answers into the scorer, covering:
 

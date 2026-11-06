@@ -22,6 +22,7 @@ from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSDurabilityPolicy, QoSHistoryPolicy
 
+from milestone1_singlevehicle.preflight import DEFAULT_MAX_START_OFFSET_M, arm_blocker, target_position
 from px4_msgs.msg import (
     OffboardControlMode,
     TrajectorySetpoint,
@@ -46,6 +47,25 @@ class OffboardControl(Node):
         super().__init__('offboard_control_solution')
         self.declare_parameter("waypoints_file", "")
         waypoints_file = self.get_parameter("waypoints_file").value
+        # PX4 instance N != 0 (e.g. a fleet drone) publishes under /px4_N/fmu/...;
+        # leave empty for the bare /fmu/... topics used by instance 0 / SITL.
+        self.declare_parameter("topic_prefix", "")
+        prefix = self.get_parameter("topic_prefix").value.rstrip('/')
+        # Real-drone safety: don't arm unless the drone is within this many
+        # metres (x/y) of the first waypoint; negative disables the check.
+        self.declare_parameter("max_start_offset_m", DEFAULT_MAX_START_OFFSET_M)
+        self.max_start_offset_m = float(self.get_parameter("max_start_offset_m").value)
+        # Fly the path relative to where the drone is when it arms, instead of
+        # to absolute EKF-origin coordinates. Use when the estimator's origin or
+        # height offset isn't trustworthy (the "-5 m" climb is then 5 m above
+        # the start). Waypoint hold/landing logic is unchanged.
+        self.declare_parameter("relative_start", False)
+        self.relative_start = bool(self.get_parameter("relative_start").value)
+        self.start_offset = None
+        # Extra wait (s) before the first arm attempt, so people can stand clear.
+        self.declare_parameter("arm_delay_s", 0.0)
+        arm_delay_s = max(0.0, float(self.get_parameter("arm_delay_s").value))
+        self.arm_after_ticks = ARM_AFTER_TICKS + int(round(arm_delay_s * 10))
 
         if not waypoints_file:
             raise ValueError("Provide the waypoints_file ROS parameter")
@@ -82,25 +102,22 @@ class OffboardControl(Node):
             depth=1)
 
         self.offboard_control_mode_pub = self.create_publisher(
-            OffboardControlMode, '/fmu/in/offboard_control_mode', qos_profile)
+            OffboardControlMode, f'{prefix}/fmu/in/offboard_control_mode', qos_profile)
         self.trajectory_setpoint_pub = self.create_publisher(
-            TrajectorySetpoint, '/fmu/in/trajectory_setpoint', qos_profile)
+            TrajectorySetpoint, f'{prefix}/fmu/in/trajectory_setpoint', qos_profile)
         self.vehicle_command_pub = self.create_publisher(
-            VehicleCommand, '/fmu/in/vehicle_command', qos_profile)
+            VehicleCommand, f'{prefix}/fmu/in/vehicle_command', qos_profile)
 
         # This PX4 build republishes VehicleLocalPosition under a versioned
         # topic name via its translation_node rather than the bare one (check
         # `ros2 topic list | grep vehicle_local_position` if this ever stops
         # matching after a PX4 update).
         self.local_position_sub = self.create_subscription(
-            VehicleLocalPosition, '/fmu/out/vehicle_local_position_v1', self.on_local_position, qos_profile)
+            VehicleLocalPosition, f'{prefix}/fmu/out/vehicle_local_position_v1', self.on_local_position, qos_profile)
 
-        # PX4 answers every command with an ack. (VehicleStatus and
-        # VehicleControlMode would show armed/offboard directly, but the
-        # px4_msgs in this workspace is older than this PX4 build's versions
-        # of them, so they can't be read reliably.)
+        # PX4 answers every command with an ack, which is all this node needs.
         self.ack_sub = self.create_subscription(
-            VehicleCommandAck, '/fmu/out/vehicle_command_ack_v1', self.on_ack, qos_profile)
+            VehicleCommandAck, f'{prefix}/fmu/out/vehicle_command_ack_v1', self.on_ack, qos_profile)
 
         self.get_logger().info(f'loaded {len(self.waypoints)} waypoints from {waypoints_file}')
 
@@ -111,6 +128,7 @@ class OffboardControl(Node):
         self.offboard_accepted = False
         self.confirmed_offboard = False
         self.landed = False
+        self.blocker = ''
         # No hold begins until both position and heading are within tolerance.
         self.hold_started_ns = None
         # Commanded (ramped) yaw sent to PX4; None until the first tick sets it.
@@ -144,26 +162,46 @@ class OffboardControl(Node):
 
         # Keep asking until PX4 accepts both arm and offboard: a single command
         # is lost if PX4 isn't ready yet or refuses to arm.
-        if self.tick >= ARM_AFTER_TICKS and not self.confirmed_offboard:
-            waited = self.tick - ARM_AFTER_TICKS
+        if self.tick >= self.arm_after_ticks and not self.confirmed_offboard:
+            waited = self.tick - self.arm_after_ticks
             if self.arm_accepted and self.offboard_accepted:
                 self.confirmed_offboard = True
                 self.get_logger().info('arm and offboard mode accepted by PX4')
             elif waited >= CONFIRM_TIMEOUT_TICKS:
                 self.get_logger().error(
-                    'PX4 did not accept arm + offboard within '
-                    f'{CONFIRM_TIMEOUT_TICKS / 10:.0f} s; giving up '
-                    '(check PX4 preflight checks / GCS connection)')
+                    f'not flying: no arm + offboard within {CONFIRM_TIMEOUT_TICKS / 10:.0f} s; giving up '
+                    f'({self.blocker or "check PX4 preflight checks / GCS connection"})')
+                if self.arm_accepted:
+                    # Armed but never reached offboard: don't leave it spinning on the ground.
+                    self.disarm()
                 self.landed = True
                 return
             elif waited % CONFIRM_RETRY_TICKS == 0:
-                self.arm()
-                self.engage_offboard_mode()
+                # In relative mode the path starts wherever the drone is, so the
+                # distance-from-origin check doesn't apply (validity still does).
+                max_offset = -1.0 if self.relative_start else self.max_start_offset_m
+                self.blocker = arm_blocker(
+                    self.current_position, self.waypoints[0]['pos'], max_offset)
+                if self.blocker:
+                    if waited % (5 * CONFIRM_RETRY_TICKS) == 0:
+                        self.get_logger().warn(f'not arming: {self.blocker}')
+                else:
+                    if self.relative_start and not (self.arm_accepted or self.offboard_accepted):
+                        # Re-captured on each retry until PX4 accepts, then frozen.
+                        p = self.current_position
+                        self.start_offset = (float(p.x), float(p.y), float(p.z))
+                        self.get_logger().info(
+                            f'relative start: path origin = x {p.x:.2f} y {p.y:.2f} z {p.z:.2f} (EKF frame)')
+                    self.arm()
+                    self.engage_offboard_mode()
 
         self.tick += 1
 
         if self.confirmed_offboard and self.current_position is not None:
             self.advance_waypoint_if_reached()
+
+    def target_position(self, target):
+        return target_position(target['pos'], self.relative_start, self.start_offset, self.current_position)
 
     def current_target(self):
         return self.waypoints[self.waypoint_index]
@@ -174,8 +212,10 @@ class OffboardControl(Node):
         if position is None or not position.xy_valid or not position.z_valid:
             self.hold_started_ns = None
             return
+        if self.relative_start and self.start_offset is None:
+            return
 
-        tx, ty, tz = target['pos']
+        tx, ty, tz = self.target_position(target)
         distance = math.sqrt(
             (position.x - tx) ** 2
             + (position.y - ty) ** 2
@@ -227,7 +267,7 @@ class OffboardControl(Node):
 
     def publish_trajectory_setpoint(self, target):
         msg = TrajectorySetpoint()
-        msg.position = list(target['pos'])
+        msg.position = list(self.target_position(target))
         # Ramp toward the YAML yaw (radians) rather than stepping straight to
         # it, so PX4 doesn't overshoot on a large heading change.
         msg.yaw = self.ramped_yaw(target['yaw'])
@@ -269,6 +309,10 @@ class OffboardControl(Node):
         self.publish_vehicle_command(
             VehicleCommand.VEHICLE_CMD_DO_SET_MODE, param1=1.0, param2=PX4_CUSTOM_MAIN_MODE_OFFBOARD)
         self.get_logger().info('offboard mode command sent')
+
+    def disarm(self):
+        self.publish_vehicle_command(VehicleCommand.VEHICLE_CMD_COMPONENT_ARM_DISARM, param1=0.0)
+        self.get_logger().info('disarm command sent')
 
     def land(self):
         self.publish_vehicle_command(VehicleCommand.VEHICLE_CMD_NAV_LAND)
