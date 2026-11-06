@@ -1,0 +1,5 @@
+# The apt versions on Ubuntu 22.04 are too old, so install these with pip3.
+fastapi>=0.110
+uvicorn>=0.29
+websockets>=12
+pyyaml>=5.4
