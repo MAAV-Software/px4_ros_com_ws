@@ -1,0 +1,4 @@
+# SITL stress test; local North/East/Down, radians. Not baseline scoring input.
+waypoints:
+  - {pos: [0, 0, -5], yaw: -2.3562, hold_s: 10.0}
+  - {pos: [-20, -20, -5], yaw: -2.3562, hold_s: 5.0}
