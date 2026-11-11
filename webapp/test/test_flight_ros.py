@@ -96,8 +96,10 @@ def flight(flight_ros, clock):
     return flight_ros.RosFlight('d1', '/px4_1', system_id=2, now=clock)
 
 
-def position(x=0.0, y=0.0, z=0.0, vz=0.0, xy_valid=True, z_valid=True, xy_global=True):
-    return SimpleNamespace(x=x, y=y, z=z, vz=vz, xy_valid=xy_valid, z_valid=z_valid, xy_global=xy_global)
+def position(x=0.0, y=0.0, z=0.0, vz=0.0, xy_valid=True, z_valid=True, xy_global=True,
+             ref_lat=47.397971057728974, ref_lon=8.546163739800146):
+    return SimpleNamespace(x=x, y=y, z=z, vz=vz, xy_valid=xy_valid, z_valid=z_valid, xy_global=xy_global,
+                           ref_lat=ref_lat, ref_lon=ref_lon)
 
 
 def sub(flight, name):
@@ -154,7 +156,7 @@ def test_the_nodes_arm_ack_marks_the_drone_armed(flight):
 
 
 def test_stale_position_blocks_the_start(flight, clock):
-    launch = {'args': {}, 'waypoints': None}
+    launch = {'effective': {}}
     assert 'no vehicle_local_position' in flight.problems(launch)[0]
     sub(flight, 'vehicle_local_position_v1')(position())
     assert flight.problems(launch) == []
@@ -166,18 +168,28 @@ def test_preflight_reuses_arm_blocker_with_the_first_waypoint(flight, tmp_path):
     folder = tmp_path / 'wp' / 'resource'
     folder.mkdir(parents=True)
     (folder / 'x.yaml').write_text('waypoints:\n  - {pos: [0.0, 0.0, -5.0], yaw: 0.0, hold_s: 5}\n')
-    launch = {'args': {}, 'waypoints': {'package': 'wp', 'file': 'resource/x.yaml'}}
+    path = str(folder / 'x.yaml')
     sub(flight, 'vehicle_local_position_v1')(position(x=10.0))
-    assert 'from the first waypoint' in flight.problems(launch)[0]
-    launch['args'] = {'relative_start': 'true'}
-    assert flight.problems(launch) == []
-    launch['args'] = {'max_start_offset_m': '50'}
-    assert flight.problems(launch) == []
+    assert 'from the first waypoint' in flight.problems({'effective': {'path': path}})[0]
+    assert flight.problems({'effective': {'path': path, 'relative_start': 'true'}}) == []
+    assert flight.problems({'effective': {'path': path, 'max_start_offset_m': '50'}}) == []
+
+
+def test_no_path_argument_means_no_waypoint_check(flight):
+    sub(flight, 'vehicle_local_position_v1')(position(x=10.0))
+    assert flight.problems({'effective': {}}) == []
+
+
+def test_a_path_file_of_another_shape_is_left_to_the_launch(flight, tmp_path):
+    other = tmp_path / 'other.yaml'
+    other.write_text('drones: [a, b]\n')
+    sub(flight, 'vehicle_local_position_v1')(position(x=10.0))
+    assert flight.problems({'effective': {'path': str(other)}}) == []
 
 
 def test_missing_waypoint_file_is_reported_not_raised(flight):
     sub(flight, 'vehicle_local_position_v1')(position())
-    launch = {'args': {}, 'waypoints': {'package': 'wp', 'file': 'nope.yaml'}}
+    launch = {'effective': {'path': '/nope/nope.yaml'}}
     assert 'cannot read the waypoints file' in flight.problems(launch)[0]
 
 
@@ -193,7 +205,7 @@ def test_vehicle_status_reaches_the_tracker(flight):
 
 
 def test_failing_px4_preflight_blocks_the_start(flight):
-    launch = {'args': {}, 'waypoints': None}
+    launch = {'effective': {}}
     sub(flight, 'vehicle_local_position_v1')(position())
     sub(flight, 'vehicle_status_v4')(status(preflight=False, gcs_lost=True))
     assert 'no ground station connected' in flight.problems(launch)[0]
@@ -207,12 +219,12 @@ def test_px4_preflight_is_ignored_while_left_in_offboard(flight):
     """It always fails in Offboard with no setpoints, which says nothing about the drone."""
     sub(flight, 'vehicle_local_position_v1')(position())
     sub(flight, 'vehicle_status_v4')(status(nav_state=14, preflight=False))
-    assert flight.problems({'args': {}, 'waypoints': None}) == []
+    assert flight.problems({'effective': {}}) == []
 
 
 def test_missing_vehicle_status_does_not_block_the_start(flight):
     sub(flight, 'vehicle_local_position_v1')(position())
-    assert flight.problems({'args': {}, 'waypoints': None}) == []
+    assert flight.problems({'effective': {}}) == []
 
 
 def test_gps_fix_and_rc_link_are_reported(flight):
@@ -270,11 +282,19 @@ def test_launch_argv_and_output_flow_through(flight, monkeypatch, flight_ros):
             return ['\x1b[32m[n-1] [INFO] [1.0] [x]: loaded 22 waypoints from a.yaml\x1b[0m\n']
 
     monkeypatch.setattr(flight_ros, 'LaunchProcess', StubProcess)
-    flight.start({'package': 'p', 'file': 'f.launch.py', 'args': {}, 'waypoints': None})
-    assert captured['argv'][:4] == ['ros2', 'launch', 'p', 'f.launch.py']
-    assert 'topic_prefix:=/px4_1' in captured['argv']
+    flight.start({'package': 'p', 'file': 'f.launch.py', 'args': {}, 'declared': ['topic_prefix']})
+    assert captured['argv'] == ['ros2', 'launch', 'p', 'f.launch.py', 'topic_prefix:=/px4_1']
     flight.poll()
     assert flight.snapshot()['waypoint_total'] == 22
     assert flight.drain_logs() == [('INFO', '[n-1] [INFO] [1.0] [x]: loaded 22 waypoints from a.yaml')]
     flight.stop()
     assert captured['stopped']
+
+
+def test_latitude_and_longitude_come_from_px4s_own_reference(flight):
+    sub(flight, 'vehicle_local_position_v1')(position(x=1.112, y=0.0))
+    place = flight.snapshot()['global']
+    assert place['lat'] == pytest.approx(47.397971057728974 + 1e-5, abs=1e-7)
+    assert place['lon'] == pytest.approx(8.546163739800146, abs=1e-9)
+    sub(flight, 'vehicle_local_position_v1')(position(xy_global=False))
+    assert flight.snapshot()['global'] is None

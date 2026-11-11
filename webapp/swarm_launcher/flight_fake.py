@@ -23,13 +23,20 @@ NAV_WHEN_COMMANDED = {
 }
 
 
+# PX4's Gazebo world origin, where SITL drones start.
+SITL_HOME = (47.397971057728974, 8.546163739800146)
+
 class FakeFlight:
     """reports_status=False stands in for firmware whose vehicle_status can't be read."""
 
     def __init__(self, speed=1.0, now=time.monotonic, problems=(), launch_fails=False,
-                 gives_up=False, ignores_hold=False, crashes_after_s=None, reports_status=True):
+                 gives_up=False, ignores_hold=False, crashes_after_s=None, reports_status=True,
+                 rc_lost=False, origin=SITL_HOME):
         self.speed = speed
+        # Where this pretend drone's EKF origin is, as PX4's ref_lat/ref_lon would say.
+        self.origin = origin
         self.now = now
+        self.rc_lost = rc_lost
         self.preflight_problems = list(problems)
         self.launch_fails = launch_fails
         self.gives_up = gives_up
@@ -78,7 +85,7 @@ class FakeFlight:
         self.crashed = False
         self.forced_nav_state = None
         self.exit_code = None
-        self.arm_delay_s = float(launch.get('args', {}).get('arm_delay_s', 0.0))
+        self.arm_delay_s = float(launch.get('effective', {}).get('arm_delay_s', 0.0))
         self.launch_running = True
         self._node_log('INFO', f'loaded {WAYPOINTS} waypoints from fake.yaml')
 
@@ -129,7 +136,8 @@ class FakeFlight:
             'battery_pct': 100 if not tracker.was_airborne else 80,
             'global_position_ok': True,
             'gps_fix': 6,
-            'rc_lost': False,
+            'rc_lost': self.rc_lost,
+            'global': {'lat': self.origin[0], 'lon': self.origin[1]},
             **tracker.summary(self.launch_running, self.commanded),
         }
 

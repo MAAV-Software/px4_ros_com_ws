@@ -57,18 +57,23 @@ def test_the_log_lines_parsed_here_still_exist_in_the_node(phrase):
     assert phrase in NODE.read_text()
 
 
-def test_launch_argv_builds_arguments_from_the_manifest():
+def test_launch_argv_passes_changed_arguments_and_the_launchers_own():
     launch = {'package': 'pkg', 'file': 'a.launch.py', 'args': {'record': 'true'},
-              'waypoints': {'package': 'wp', 'file': 'resource/x.yaml'}}
-    argv = launch_argv(launch, '/px4_1', lambda package: f'/share/{package}')
+              'declared': ['launch_sitl', 'record', 'system_id', 'topic_prefix']}
+    argv = launch_argv(launch, '/px4_1', 2)
     assert argv == ['ros2', 'launch', 'pkg', 'a.launch.py', 'record:=true',
-                    'topic_prefix:=/px4_1', 'path:=/share/wp/resource/x.yaml']
+                    'launch_sitl:=false', 'topic_prefix:=/px4_1', 'system_id:=2']
+
+
+def test_launch_argv_only_sets_what_the_file_declares():
+    launch = {'package': 'pkg', 'file': 'a.launch.py', 'args': {}, 'declared': []}
+    assert launch_argv(launch, '/px4_1', 2) == ['ros2', 'launch', 'pkg', 'a.launch.py']
 
 
 def test_launch_argv_leaves_out_an_empty_prefix():
     """ros2 launch refuses `topic_prefix:=`, which SITL's instance 0 would otherwise send."""
-    launch = {'package': 'pkg', 'file': 'a.launch.py', 'args': {}, 'waypoints': None}
-    assert launch_argv(launch, '', str) == ['ros2', 'launch', 'pkg', 'a.launch.py']
+    launch = {'package': 'pkg', 'file': 'a.launch.py', 'args': {}, 'declared': ['topic_prefix', 'system_id']}
+    assert launch_argv(launch, '', 1) == ['ros2', 'launch', 'pkg', 'a.launch.py', 'system_id:=1']
 
 
 def test_log_level_and_cleaning():

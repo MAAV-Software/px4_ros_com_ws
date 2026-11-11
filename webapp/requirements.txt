@@ -3,3 +3,4 @@ fastapi>=0.110
 uvicorn>=0.29
 websockets>=12
 pyyaml>=5.4
+cryptography>=3.4

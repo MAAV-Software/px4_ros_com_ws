@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { CommandResult, LogLine, Mission, Snapshot } from './types';
+import type { CommandResult, LogLine, Snapshot, Trails } from './types';
 
 const RECONNECT_MS = 1000;
 // The hub sends state twice a second. A locked phone or a lost Wi-Fi link doesn't
@@ -12,9 +12,10 @@ function newCommandId() {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
+// A bare name is a mission command; a path such as /api/mode is used as it is.
 async function postCommand(path: string, body: object): Promise<CommandResult> {
   try {
-    const response = await fetch(`/api/mission/${path}`, {
+    const response = await fetch(path.startsWith('/') ? path : `/api/mission/${path}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -30,7 +31,7 @@ export function useHub() {
   const [receivedAt, setReceivedAt] = useState(0);
   const [linked, setLinked] = useState(false);
   const [logs, setLogs] = useState<LogLine[]>([]);
-  const [missions, setMissions] = useState<Mission[]>([]);
+  const [trails, setTrails] = useState<Trails>({ version: -1, points: {} });
   const [abortHeld, setAbortHeld] = useState(false);
   const lastSeq = useRef(0);
   const heldCommandId = useRef('');
@@ -48,10 +49,6 @@ export function useHub() {
       socket = current;
       current.onopen = () => {
         lastMessageAt = performance.now();
-        fetch('/api/missions')
-          .then((response) => response.json())
-          .then(setMissions)
-          .catch(() => undefined);
       };
       current.onmessage = (event) => {
         lastMessageAt = performance.now();
@@ -60,6 +57,18 @@ export function useHub() {
         if (message.type === 'state') {
           setSnapshot(message as Snapshot);
           setReceivedAt(performance.now());
+        } else if (message.type === 'trail') {
+          // The whole trail when the hub says so (a new socket, a new run or a new grid), else the new points.
+          setTrails((previous) => {
+            if (message.full || message.version !== previous.version) {
+              return { version: message.version, points: message.points };
+            }
+            const points = { ...previous.points };
+            for (const [id, added] of Object.entries(message.points as Trails['points'])) {
+              points[id] = [...(points[id] ?? []), ...added];
+            }
+            return { version: message.version, points };
+          });
         } else if (message.type === 'log') {
           const lines = message.lines as LogLine[];
           // Numbers going backwards means the hub restarted, and this is its whole log.
@@ -119,7 +128,7 @@ export function useHub() {
     return () => window.clearInterval(retry);
   }, [abortHeld, linked, sendHeldAbort]);
 
-  return { snapshot, receivedAt, linked, logs, missions, command, abort, abortHeld, cancelHeldAbort };
+  return { snapshot, receivedAt, linked, logs, trails, command, abort, abortHeld, cancelHeldAbort };
 }
 
 export type Hub = ReturnType<typeof useHub>;

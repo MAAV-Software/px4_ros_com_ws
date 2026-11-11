@@ -5,11 +5,7 @@ from swarm_launcher import hub_core
 from swarm_launcher.hub_core import (
     ABORTED, ABORTING, COMPLETE, IDLE, LANDING, PREFLIGHT, READY, SEARCHING, STARTING, HubCore)
 
-MISSION = {
-    'id': 'm', 'name': 'M', 'spoken_name': 'm', 'inputs': [],
-    'drones': {'d1': {'role': 'search'}, 'd2': {'role': 'verify'}},
-    'launch': {'package': 'p', 'file': 'f.launch.py', 'args': {}, 'waypoints': None},
-}
+MISSION_ID = 'p/f.launch.py'
 
 
 class FakeLink:
@@ -25,7 +21,7 @@ class FakeLink:
 
 @pytest.fixture
 def core(clock):
-    return HubCore({'m': MISSION}, now=clock)
+    return HubCore(now=clock)
 
 
 @pytest.fixture
@@ -40,10 +36,20 @@ def status(core, drone_id, **fields):
     core.agent_message(drone_id, {'type': 'status', **fields})
 
 
+def select(core, drones=('d1', 'd2'), args=None, file='f.launch.py'):
+    return core.select('p', file, list(drones), args or {})
+
+
+def answer(core, drone_id, problems=(), launch_args=None, check_id=None):
+    core.agent_message(drone_id, {'type': 'preflight_result', 'mission_id': MISSION_ID,
+                                  'check_id': core.check_id if check_id is None else check_id,
+                                  'problems': list(problems), 'launch_args': launch_args})
+
+
 def to_ready(core):
-    assert core.select('m')['ok']
+    assert select(core)['ok']
     for drone_id in ('d1', 'd2'):
-        core.agent_message(drone_id, {'type': 'preflight_result', 'mission_id': 'm', 'problems': []})
+        answer(core, drone_id)
     assert core.state == READY
 
 
@@ -65,36 +71,33 @@ def to_searching(core):
 
 def test_select_needs_every_drone_connected(core):
     core.agent_connected('d1', FakeLink())
-    assert not core.select('m')['ok']
+    assert not select(core)['ok']
     assert core.state == IDLE
     assert 'd2' in core.reason
 
 
-def test_unknown_mission_is_refused(core, links):
-    assert not core.select('nope')['ok']
-
-
 def test_preflight_passes_to_ready(core, links):
-    core.select('m')
+    select(core)
     assert core.state == PREFLIGHT
-    assert 'preflight' in links['d1'].kinds()
-    to_ready_result = core.agent_message('d1', {'type': 'preflight_result', 'mission_id': 'm', 'problems': []})
-    assert to_ready_result is None and core.state == PREFLIGHT
-    core.agent_message('d2', {'type': 'preflight_result', 'mission_id': 'm', 'problems': []})
+    assert links['d1'].sent[-1] == {'type': 'preflight', 'check_id': core.check_id, 'mission_id': MISSION_ID,
+                                    'mode': 'hitl', 'launch': {'package': 'p', 'file': 'f.launch.py', 'args': {}}}
+    answer(core, 'd1')
+    assert core.state == PREFLIGHT
+    answer(core, 'd2')
     assert core.state == READY
 
 
 def test_failed_check_returns_to_idle_and_says_why(core, links):
-    core.select('m')
-    core.agent_message('d1', {'type': 'preflight_result', 'mission_id': 'm', 'problems': []})
-    core.agent_message('d2', {'type': 'preflight_result', 'mission_id': 'm', 'problems': ['no GPS']})
+    select(core)
+    answer(core, 'd1')
+    answer(core, 'd2', ['no GPS'])
     assert core.state == IDLE
     assert 'd2' in core.reason
     assert core.snapshot()['checks']['d2'] == {'ok': False, 'problems': ['no GPS']}
 
 
 def test_silent_preflight_times_out(core, links, clock):
-    core.select('m')
+    select(core)
     clock.advance(hub_core.PREFLIGHT_TIMEOUT_S + 1)
     core.tick()
     assert core.state == IDLE
@@ -331,16 +334,37 @@ def test_late_reconnect_keeps_the_new_link(core, links):
 
 def test_restarted_hub_picks_up_a_run_and_can_abort_it(core, links, clock):
     """A hub that comes back Idle with drones flying must not leave abort with nothing to act on."""
-    status(core, 'd1', run_state='running', run_id='r1', mission_id='m', run_age_s=30.0, airborne=True, armed=True)
+    status(core, 'd1', run_state='running', run_id='r1', mission_id=MISSION_ID, run_age_s=30.0, airborne=True, armed=True)
     assert core.state == SEARCHING
-    assert core.committed and core.run_id == 'r1' and core.mission['id'] == 'm'
+    assert core.committed and core.run_id == 'r1' and core.mission['id'] == MISSION_ID
     assert core.snapshot()['clock']['elapsed_ms'] == 30000
+    # The hub learns who else is in the run from their own reports.
+    status(core, 'd2', run_state='running', run_id='r1', mission_id=MISSION_ID, run_age_s=30.0, airborne=True)
+    assert core.mission['drones'] == ['d1', 'd2']
     core.abort()
     assert core.state == ABORTING
     assert 'abort' in links['d1'].kinds() and 'abort' in links['d2'].kinds()
     core.agent_message('d1', {'type': 'abort_ack', 'result': 'holding'})
     core.agent_message('d2', {'type': 'abort_ack', 'result': 'not_armed'})
     assert core.state == ABORTED
+
+
+def test_a_drone_that_reports_the_run_after_an_abort_is_aborted_too(core, links):
+    status(core, 'd1', run_state='running', run_id='r1', mission_id=MISSION_ID, airborne=True, armed=True)
+    core.abort()
+    core.agent_message('d1', {'type': 'abort_ack', 'result': 'holding'})
+    assert core.state == ABORTED
+    status(core, 'd2', run_state='running', run_id='r1', mission_id=MISSION_ID, airborne=True, armed=True)
+    assert core.state == ABORTING
+    assert links['d2'].kinds()[-1] == 'abort'
+    core.agent_message('d2', {'type': 'abort_ack', 'result': 'holding'})
+    assert core.state == ABORTED and core.snapshot()['abort_results'] == {'d1': 'holding', 'd2': 'holding'}
+
+
+def test_a_restarted_hub_picks_up_every_drone_already_reporting_the_run(core, links):
+    status(core, 'd2', run_state='idle', run_id='r1', mission_id=MISSION_ID, airborne=True)
+    status(core, 'd1', run_state='running', run_id='r1', mission_id=MISSION_ID, airborne=True)
+    assert core.mission['drones'] == ['d1', 'd2']
 
 
 def test_restarted_hub_picks_up_a_run_with_no_manifest(core, links):
@@ -351,7 +375,7 @@ def test_restarted_hub_picks_up_a_run_with_no_manifest(core, links):
 
 def test_restarted_hub_picks_up_a_failed_run_still_in_the_air(core, links):
     """Seen in SITL: the hub came back Idle over an airborne drone, with the abort bar disabled."""
-    status(core, 'd1', run_state='failed', failure='node died', run_id='r1', mission_id='m', run_age_s=9.0, airborne=True)
+    status(core, 'd1', run_state='failed', failure='node died', run_id='r1', mission_id=MISSION_ID, run_age_s=9.0, airborne=True)
     assert core.state == SEARCHING
     core.abort()
     assert core.state == ABORTING
@@ -384,8 +408,8 @@ def test_an_old_idle_abort_does_not_carry_over(core, clock):
 
 
 def test_run_that_finished_while_the_hub_was_down_is_reported_complete(core, links, clock):
-    status(core, 'd1', run_state='done', run_id='r1', mission_id='m', run_age_s=40.0, airborne=False)
-    status(core, 'd2', run_state='done', run_id='r1', mission_id='m', run_age_s=41.0, airborne=False)
+    status(core, 'd1', run_state='done', run_id='r1', mission_id=MISSION_ID, run_age_s=40.0, airborne=False)
+    status(core, 'd2', run_state='done', run_id='r1', mission_id=MISSION_ID, run_age_s=41.0, airborne=False)
     assert core.state == COMPLETE
     assert core.run_id == 'r1'
     elapsed = core.snapshot()['clock']['elapsed_ms']
@@ -401,9 +425,9 @@ def test_flight_that_crashed_and_landed_while_the_hub_was_down_is_complete(core,
 
 
 def test_run_that_never_flew_is_not_picked_up(core, links):
-    status(core, 'd1', run_state='failed', run_id='r1', mission_id='m', landed_after_flight=False, airborne=False)
+    status(core, 'd1', run_state='failed', run_id='r1', mission_id=MISSION_ID, landed_after_flight=False, airborne=False)
     assert core.state == IDLE
-    status(core, 'd1', run_state='aborted', run_id='r1', mission_id='m', airborne=False)
+    status(core, 'd1', run_state='aborted', run_id='r1', mission_id=MISSION_ID, airborne=False)
     assert core.state == IDLE
 
 
@@ -421,7 +445,7 @@ def test_a_run_the_hub_closed_is_not_picked_up_again(core, links):
     run_id = core.run_id
     status(core, 'd1', run_state='failed', failure='PX4 never became ready', armed=False, airborne=False, run_id=run_id)
     assert core.state == IDLE
-    status(core, 'd2', run_state='running', run_id=run_id, mission_id='m', armed=False, airborne=False)
+    status(core, 'd2', run_state='running', run_id=run_id, mission_id=MISSION_ID, armed=False, airborne=False)
     assert core.state == IDLE
 
 
@@ -430,3 +454,355 @@ def test_logs_come_back_after_a_sequence_number(core):
     seq = core.log_seq
     core.log('hub', 'INFO', 'two')
     assert [line['text'] for line in core.logs_after(seq)] == ['two']
+
+
+# --- Picking a launch file ---------------------------------------------------------
+
+CATALOG = [{'folder': 'p_folder', 'package': 'p', 'files': [{'file': 'f.launch.py', 'built': True}]}]
+ARGUMENTS = [{'name': 'record', 'default': 'false', 'description': '', 'choices': [], 'included': False}]
+
+
+def test_each_drone_is_asked_for_its_catalog_and_the_phone_sees_it(core, links):
+    assert links['d1'].kinds() == ['catalog_request']
+    core.agent_message('d1', {'type': 'catalog', 'folders': CATALOG})
+    assert core.snapshot()['catalogs'] == {'d1': CATALOG}
+    core.agent_disconnected('d1', links['d1'])
+    assert core.snapshot()['catalogs'] == {}
+
+
+def test_the_folder_name_comes_from_the_catalog(core, links):
+    core.agent_message('d1', {'type': 'catalog', 'folders': CATALOG})
+    select(core)
+    assert core.snapshot()['mission'] == {'id': MISSION_ID, 'name': 'f.launch.py', 'folder': 'p_folder',
+                                          'package': 'p', 'file': 'f.launch.py', 'drones': ['d1', 'd2'],
+                                          'args': {}}
+
+
+@pytest.mark.parametrize('package, file, drones, args, reason', [
+    ('', 'f.launch.py', ['d1'], {}, 'pick a folder and a launch file'),
+    ('p', '../../bin/sh', ['d1'], {}, 'pick a folder and a launch file'),
+    ('p', 'f.launch.py', [], {}, 'pick at least one drone'),
+    ('p', 'f.launch.py', ['d1'], {'launch_sitl': 'true'}, 'launch_sitl is set by the launcher'),
+    ('p', 'f.launch.py', ['d1'], {'record': 'a\nb'}, 'bad value for record'),
+])
+def test_a_malformed_pick_is_refused(core, links, package, file, drones, args, reason):
+    result = core.select(package, file, drones, args)
+    assert not result['ok'] and result['reason'] == reason
+    assert core.state == IDLE and core.mission is None
+
+
+def test_only_the_picked_drones_are_checked_and_flown(core, links):
+    select(core, drones=['d2'])
+    assert 'preflight' not in links['d1'].kinds()
+    answer(core, 'd2')
+    assert core.state == READY
+    core.start()
+    assert 'package' in links['d2'].kinds() and 'package' not in links['d1'].kinds()
+    views = {drone['id']: drone['in_mission'] for drone in core.snapshot()['drones']}
+    assert views == {'d1': False, 'd2': True}
+
+
+def test_emptied_fields_mean_the_default_and_the_rest_go_to_the_drones(core, links):
+    select(core, args={'record': 'true', 'path': ''})
+    assert links['d1'].sent[-1]['launch']['args'] == {'record': 'true'}
+
+
+def test_an_answer_to_an_older_check_is_ignored(core, links):
+    select(core)
+    old = core.check_id
+    select(core, args={'record': 'true'})
+    answer(core, 'd1', check_id=old)
+    answer(core, 'd2', check_id=old)
+    assert core.state == PREFLIGHT
+
+
+def test_the_files_arguments_reach_the_phone_and_survive_a_recheck(core, links):
+    select(core)
+    answer(core, 'd2', launch_args=ARGUMENTS)
+    answer(core, 'd1', launch_args=ARGUMENTS + [{'name': 'path', 'default': '/d1/x.yaml'}])
+    # The first picked drone's view wins, since defaults that are paths can differ per drone.
+    assert core.snapshot()['launch_args']['source'] == 'd1'
+    select(core, args={'record': 'true'})
+    assert core.snapshot()['launch_args']['source'] == 'd1'
+    select(core, file='g_launch.py')
+    assert core.snapshot()['launch_args'] is None
+
+
+def test_the_run_id_is_named_after_the_file(core, links):
+    to_ready(core)
+    core.start()
+    assert core.run_id.endswith('_f_launch')
+
+
+def test_reset_keeps_the_pick_so_it_can_fly_again(core, links):
+    to_searching(core)
+    core.mission['args'] = {'record': 'true'}
+    for _ in range(2):
+        for drone_id in ('d1', 'd2'):
+            status(core, drone_id, run_state='done', run_id=core.run_id, airborne=False, armed=False)
+    assert core.state == COMPLETE
+    assert core.reset()['ok']
+    assert core.state == IDLE and core.run_id is None and core.checks == {}
+    assert core.snapshot()['mission']['args'] == {'record': 'true'}
+
+
+def test_reset_forgets_a_run_picked_up_after_a_restart(core, links):
+    status(core, 'd1', run_state='done', run_id='r1', mission_id=MISSION_ID, airborne=False, armed=False)
+    status(core, 'd2', run_state='done', run_id='r1', mission_id=MISSION_ID, airborne=False, armed=False)
+    assert core.state == COMPLETE
+    core.reset()
+    assert core.mission is None
+
+
+# --- SITL or HITL ------------------------------------------------------------------
+
+from swarm_launcher.sitl_manager import FakeBackend, SitlManager  # noqa: E402
+
+
+@pytest.fixture
+def sitl_core(clock):
+    saved = []
+    core = HubCore(now=clock, mode='sitl', save_mode=saved.append, sitl=SitlManager(FakeBackend(), now=clock))
+    core.saved = saved
+    return core
+
+
+def kind(core, drone_id, sim):
+    core.agent_message(drone_id, {'type': 'catalog', 'folders': [], 'sim': sim})
+
+
+def test_mode_is_in_every_check_and_package(core, links):
+    to_ready(core)
+    core.start()
+    assert links['d1'].sent[-1]['type'] == 'package' and links['d1'].sent[-1]['mode'] == 'hitl'
+
+
+def test_switching_mode_clears_the_pick_and_is_saved(sitl_core):
+    links = {d: FakeLink() for d in ('d1', 'd2')}
+    for drone_id, link in links.items():
+        sitl_core.agent_connected(drone_id, link)
+        kind(sitl_core, drone_id, True)
+    select(sitl_core)
+    assert sitl_core.state == PREFLIGHT
+    assert sitl_core.set_mode('hitl')['ok']
+    assert sitl_core.mode == 'hitl' and sitl_core.saved == ['hitl']
+    assert sitl_core.state == IDLE and sitl_core.mission is None and sitl_core.checks == {}
+    assert not sitl_core.set_mode('both')['ok']
+
+
+def test_no_switching_mode_during_a_run(core, links):
+    to_searching(core)
+    result = core.set_mode('sitl')
+    assert not result['ok'] and result['reason'] == 'cannot switch to SITL during a run'
+    assert core.mode == 'hitl'
+
+
+def test_drones_of_the_other_kind_cannot_be_picked(core, links):
+    kind(core, 'd1', True)
+    result = select(core)
+    assert not result['ok'] and result['reason'] == 'd1: SITL drone. Switch to SITL to fly it'
+    assert core.snapshot()['drones'][0]['sim'] is True
+    kind(core, 'd1', False)
+    assert select(core)['ok']
+
+
+def test_sitl_drones_are_added_one_at_a_time(sitl_core, clock):
+    assert sitl_core.sitl_add()['ok']
+    assert sitl_core.snapshot()['sitl'] == {'available': True, 'drones': [
+        {'drone_id': 'sim1', 'instance': 0, 'state': 'starting', 'detail': 'starting PX4'}]}
+    assert sitl_core.sitl_add()['reason'] == 'wait for sim1 to finish starting'
+    sitl_core.agent_connected('sim1', FakeLink())
+    assert sitl_core._sitl_view()[0]['detail'] == 'waiting for a position'
+    status(sitl_core, 'sim1', sim=True, position_ok=True)
+    assert sitl_core._sitl_view()[0]['state'] == 'ready'
+    assert sitl_core.sitl_add()['ok']
+    clock.advance(hub_core.SITL_START_TIMEOUT_S + 1)
+    assert sitl_core._sitl_view()[1]['state'] == 'stuck'
+
+
+def test_sitl_drones_can_only_be_added_in_sitl(core):
+    core.sitl = SitlManager(FakeBackend())
+    assert core.sitl_add()['reason'] == 'switch to SITL to add SITL drones'
+    core.mode, core.sitl = 'sitl', None
+    assert core.sitl_add()['reason'] == 'this hub cannot start SITL drones'
+
+
+def test_a_sitl_drone_in_the_air_or_in_a_run_stays(sitl_core):
+    sitl_core.sitl_add()
+    sitl_core.agent_connected('sim1', FakeLink())
+    status(sitl_core, 'sim1', sim=True, position_ok=True, airborne=True)
+    assert sitl_core.sitl_remove('sim1')['reason'] == 'sim1 still airborne'
+    assert sitl_core.sitl_stop_all()['reason'] == 'sim1 still airborne'
+    status(sitl_core, 'sim1', sim=True, position_ok=True, airborne=False)
+    sitl_core.mission = {'drones': ['sim1']}
+    sitl_core.state = SEARCHING
+    assert 'a run is using it' in sitl_core.sitl_remove('sim1')['reason']
+    sitl_core.state = IDLE
+    assert sitl_core.sitl_remove('sim1')['ok']
+
+
+def test_a_removed_sitl_drone_leaves_the_fleet_once_its_agent_goes(sitl_core):
+    sitl_core.sitl_add()
+    link = FakeLink()
+    sitl_core.agent_connected('sim1', link)
+    status(sitl_core, 'sim1', sim=True, position_ok=True)
+    sitl_core.tick()
+    sitl_core.sitl_remove('sim1')
+    sitl_core.tick()
+    assert [d['id'] for d in sitl_core.snapshot()['drones']] == ['sim1']  # Agent still connected.
+    sitl_core.agent_disconnected('sim1', link)
+    sitl_core.tick()
+    assert sitl_core.snapshot()['drones'] == [] and sitl_core.snapshot()['sitl']['drones'] == []
+
+
+def test_a_real_drone_that_drops_out_stays_in_the_fleet(sitl_core):
+    link = FakeLink()
+    sitl_core.agent_connected('drone1', link)
+    sitl_core.agent_disconnected('drone1', link)
+    sitl_core.tick()
+    assert [d['id'] for d in sitl_core.snapshot()['drones']] == ['drone1']
+
+
+def test_sitl_errors_reach_the_log(sitl_core):
+    sitl_core.sitl_add()
+    px4 = sitl_core.sitl.entries[0]['px4']
+    px4.alive, px4.code = False, 1
+    sitl_core.tick()
+    assert any(line['source'] == 'sim1' and line['text'] == 'PX4 exited with code 1'
+               for line in sitl_core.logs)
+
+
+# --- Search area -------------------------------------------------------------------
+
+from swarm_launcher.grid import fit_around  # noqa: E402
+
+HOME = (47.397971057728974, 8.546163739800146)
+
+
+def test_the_area_puts_each_drone_on_the_grid(clock):
+    saved = []
+    core = HubCore(now=clock, save_area=saved.append)
+    core.agent_connected('d1', FakeLink())
+    status(core, 'd1', **{'global': {'lat': HOME[0], 'lon': HOME[1]}})
+    assert core.snapshot()['drones'][0]['grid'] is None
+    assert core.set_area(fit_around(*HOME))['ok']
+    view = core.snapshot()
+    assert view['area']['flags'] == [] and set(view['area']['corners']) == {
+        'south_west', 'south_east', 'north_east', 'north_west'}
+    assert view['drones'][0]['grid'] == {'col': 3.28, 'row': 3.28, 'on_field': True}
+    assert saved[-1] == view['area']['corners']
+    assert core.set_area(None)['ok'] and core.snapshot()['area'] is None and saved[-1] is None
+
+
+def test_a_bad_area_is_refused_and_the_old_one_kept(core):
+    core.set_area(fit_around(*HOME))
+    result = core.set_area({'south_west': {'lat': 1, 'lon': 2}})
+    assert not result['ok'] and 'South-east corner is missing' in result['reason']
+    assert core.snapshot()['area'] is not None
+
+
+def test_the_area_cannot_change_during_a_run(core, links):
+    to_searching(core)
+    assert core.set_area(fit_around(*HOME))['reason'] == 'cannot change the search area during a run'
+
+
+def test_a_saved_area_is_loaded_and_a_broken_one_ignored(clock):
+    assert HubCore(now=clock, area=fit_around(*HOME)).area is not None
+    assert HubCore(now=clock, area={'south_west': 'x'}).area is None
+
+
+def test_fitting_the_area_is_for_sitl_drones_only(sitl_core, core):
+    sitl_core.agent_connected('sim1', FakeLink())
+    status(sitl_core, 'sim1', sim=True, **{'global': {'lat': HOME[0], 'lon': HOME[1]}})
+    assert sitl_core.fit_area('sim1')['ok']
+    assert sitl_core.snapshot()['drones'][0]['grid']['on_field']
+    core.agent_connected('d1', FakeLink())
+    status(core, 'd1', sim=False, **{'global': {'lat': HOME[0], 'lon': HOME[1]}})
+    assert 'only for SITL drones' in core.fit_area('d1')['reason']
+    status(sitl_core, 'sim1', sim=True, **{'global': None})
+    assert sitl_core.fit_area('sim1')['reason'] == 'sim1 has no global position yet'
+
+
+# --- Trails and colours ------------------------------------------------------------
+
+from swarm_launcher.grid import local_to_global  # noqa: E402
+
+
+def at(north, east):
+    lat, lon = local_to_global(*HOME, north, east)
+    return {'global': {'lat': lat, 'lon': lon}}
+
+
+def flying_with_area(core):
+    core.set_area(fit_around(*HOME, east_m=0, north_m=0))
+    to_searching(core)
+
+
+def test_a_trail_follows_each_picked_drone_through_its_run(core, links):
+    status(core, 'd1', **at(0, 0))  # Before the run: not recorded.
+    flying_with_area(core)
+    for north in (0, 1, 1.1, 2, 3):
+        status(core, 'd1', run_state='running', airborne=True, **at(north, 0))
+    status(core, 'd2', run_state='running', airborne=True, **at(0, 5))
+    # 1.1 m is within 0.3 m of the point before, so it adds nothing.
+    assert len(core.trails['d1']) == 4 and len(core.trails['d2']) == 1
+    message, version, counts = core.trail_update(None, {})
+    assert message['full'] and version == core.trail_version
+    assert [round(row) for _, row in message['points']['d1']] == [0, 2, 3, 5]
+    assert counts == {'d1': 4, 'd2': 1}
+
+
+def test_phones_get_only_new_points_after_the_first_send(core, links):
+    flying_with_area(core)
+    status(core, 'd1', run_state='running', airborne=True, **at(1, 1))
+    _, version, counts = core.trail_update(None, {})
+    assert core.trail_update(version, counts)[0] is None
+    status(core, 'd1', run_state='running', airborne=True, **at(2, 1))
+    message, version, counts = core.trail_update(version, counts)
+    assert not message['full'] and len(message['points']['d1']) == 1 and counts['d1'] == 2
+
+
+def test_trails_last_until_new_mission_and_restart_at_the_next_start(core, links):
+    flying_with_area(core)
+    status(core, 'd1', run_state='running', airborne=True, **at(1, 1))
+    for _ in range(2):
+        for drone_id in ('d1', 'd2'):
+            status(core, drone_id, run_state='done', run_id=core.run_id, airborne=False, armed=False)
+    assert core.state == COMPLETE and core.trails['d1']
+    status(core, 'd1', run_state='done', airborne=False, **at(9, 9))  # After the run: not recorded.
+    assert len(core.trails['d1']) == 1
+    version = core.trail_version
+    core.reset()
+    assert core.trails == {} and core.trail_version > version
+    message, _, _ = core.trail_update(version, {'d1': 1})
+    assert message['full'] and message['points'] == {}
+
+
+def test_drones_not_picked_leave_no_trail(core, links):
+    core.agent_connected('d3', FakeLink())
+    flying_with_area(core)
+    status(core, 'd3', airborne=True, **at(1, 1))
+    assert 'd3' not in core.trails
+
+
+def test_without_an_area_there_are_no_points_to_send(core, links):
+    to_searching(core)
+    status(core, 'd1', run_state='running', airborne=True, **at(1, 1))
+    message, version, counts = core.trail_update(None, {})
+    assert message['points'] == {}
+    assert core.trail_update(version, counts)[0] is None
+
+
+def test_each_drone_keeps_its_own_colour(sitl_core):
+    for drone_id in ('sim1', 'sim2', 'drone1'):
+        sitl_core.agent_connected(drone_id, FakeLink())
+    colours = {d['id']: d['color'] for d in sitl_core.snapshot()['drones']}
+    assert colours == {'sim1': 0, 'sim2': 1, 'drone1': 2}
+    # A drone leaving the fleet frees its colour for the next one.
+    sitl_core._forget_drone('sim2')
+    sitl_core.agent_connected('sim3', FakeLink())
+    assert {d['id']: d['color'] for d in sitl_core.snapshot()['drones']}['sim3'] == 1
+    for number in range(4, 9):
+        sitl_core.agent_connected(f'sim{number}', FakeLink())
+    # Past the palette, a drone is drawn in ink rather than reusing a colour.
+    assert {d['id']: d['color'] for d in sitl_core.snapshot()['drones']}['sim8'] is None

@@ -12,6 +12,7 @@ import time
 from pathlib import Path
 
 from swarm_launcher.flight_state import NAVIGATION_STATE_AUTO_LOITER, NAVIGATION_STATE_OFFBOARD
+from swarm_launcher.launch_library import ERROR, PENDING, override_problems
 
 IDLE = 'idle'
 PREPARED = 'prepared'
@@ -27,12 +28,18 @@ HOLD_CONFIRM_S = 5.0
 # not leave it hovering until the battery failsafe.
 HOLD_LIMIT_S = 60.0
 RECOVERY_RESEND_S = 10.0
+# How often src is looked at again, so a new launch file or a build shows up on the phone.
+CATALOG_EVERY_S = 5.0
+MODES = ('sitl', 'hitl')
 
 
 class Agent:
-    def __init__(self, drone_id, flight, send, runs_dir=None, now=time.monotonic):
+    def __init__(self, drone_id, flight, send, library, runs_dir=None, now=time.monotonic, sim=False):
         self.drone_id = drone_id
         self.flight = flight
+        self.library = library
+        # A SITL instance flies only in SITL mode, and a real drone only in HITL mode.
+        self.sim = sim
         self.send = send
         self.runs_dir = Path(runs_dir).expanduser() if runs_dir else None
         self.now = now
@@ -49,7 +56,11 @@ class Agent:
         self.hold_deadline = None
         self.recovery = None
         self.recovery_until = None
+        self.catalog_sent = None
+        self.catalog_checked = None
+        self.pending_preflight = None
         self.handlers = {
+            'catalog_request': self._on_catalog_request,
             'preflight': self._on_preflight,
             'package': self._on_package,
             'go': self._on_go,
@@ -66,9 +77,13 @@ class Agent:
         if handler:
             handler(message)
 
+    def _on_catalog_request(self, message):
+        self._step_catalog(force=True)
+
     def _on_preflight(self, message):
-        self.send({'type': 'preflight_result', 'mission_id': message.get('mission_id'),
-                   'problems': self._start_problems(message.get('launch') or {})})
+        # Answered once this drone has read the file's arguments, which runs in the background.
+        self.pending_preflight = message
+        self._step_preflight()
 
     def _on_package(self, message):
         """Mission package: saved to disk and acknowledged before anything can fly."""
@@ -76,10 +91,13 @@ class Agent:
         if self.run_id == run_id and self.run_state != IDLE:
             self.send({'type': 'package_ack', 'run_id': run_id, 'problems': []})
             return
-        launch = message.get('launch') or {}
-        problems = self._start_problems(launch)
+        launch, problems, _ = self._resolve(message.get('launch') or {})
+        if launch is None and not problems:
+            problems = ['still reading the launch arguments. Check again']
         if not problems:
-            problems = self._save_package(run_id, message)
+            problems = self._start_problems(launch, message.get('mode'))
+        if not problems:
+            problems = self._save_package(run_id, {**message, 'resolved': launch})
         if not problems:
             self.run_id = run_id
             self.mission_id = message.get('mission_id')
@@ -126,6 +144,8 @@ class Agent:
 
     def tick(self):
         self.flight.poll()
+        self._step_catalog()
+        self._step_preflight()
         lines = self.flight.drain_logs()
         if lines:
             self.last_launch_line = lines[-1][1]
@@ -138,6 +158,30 @@ class Agent:
         self._step_armed_after_abort()
         self._step_leave_offboard()
         self.send(self.status())
+
+    def _step_catalog(self, force=False):
+        now = self.now()
+        if not force and self.catalog_checked is not None and now - self.catalog_checked < CATALOG_EVERY_S:
+            return
+        self.catalog_checked = now
+        folders = self.library.catalog()
+        if force or folders != self.catalog_sent:
+            self.catalog_sent = folders
+            self.send({'type': 'catalog', 'folders': folders, 'sim': self.sim})
+
+    def _step_preflight(self):
+        message = self.pending_preflight
+        if message is None:
+            return
+        launch, problems, arguments = self._resolve(message.get('launch') or {})
+        if launch is None and not problems:
+            return
+        self.pending_preflight = None
+        if not problems:
+            problems = self._start_problems(launch, message.get('mode'))
+        self.send({'type': 'preflight_result', 'check_id': message.get('check_id'),
+                   'mission_id': message.get('mission_id'), 'problems': problems,
+                   'launch_args': arguments})
 
     def _step_run(self):
         snapshot = self.flight.snapshot()
@@ -251,6 +295,7 @@ class Agent:
             hold_left = max(0, round(self.hold_deadline - self.now()))
         return {
             'type': 'status',
+            'sim': self.sim,
             'run_id': self.run_id,
             'mission_id': self.mission_id,
             'run_state': self.run_state,
@@ -265,6 +310,7 @@ class Agent:
             'airborne': snapshot['airborne'],
             'position_ok': snapshot['position_ok'],
             'position': snapshot['position'],
+            'global': snapshot.get('global'),
             'battery_pct': snapshot['battery_pct'],
             'global_position_ok': snapshot['global_position_ok'],
             'gps_fix': snapshot['gps_fix'],
@@ -302,9 +348,72 @@ class Agent:
         self.failure = reason
         self.run_state = FAILED
 
-    def _start_problems(self, launch):
+    def _resolve(self, launch):
+        """Check a launch the hub sent against this drone's own src and the file's arguments.
+
+        Returns (launch, problems, arguments). The launch it returns adds what this drone
+        works out for itself: every argument the file declares, and the value each will
+        have, with launch_sitl always false. (None, [], None) means the arguments are
+        still being read.
+        """
+        package, file = launch.get('package'), launch.get('file')
+        overrides = launch.get('args') or {}
+        problems = override_problems(overrides)
+        if problems:
+            return None, problems, None
+        entry = self.library.find(package, file) if isinstance(package, str) and isinstance(file, str) else None
+        if entry is None:
+            return None, [f"no {file} for {package} in this drone's src"], None
+        if not entry['built']:
+            return None, [f'{package} is not built here, or was built after the agent started'], None
+        state, arguments = self.library.describe(package, file)
+        if state == PENDING:
+            return None, [], None
+        if state == ERROR:
+            return None, [arguments], None
+        declared = {argument['name'] for argument in arguments}
+        unknown = sorted(set(overrides) - declared)
+        if unknown:
+            return None, [f"{file} has no argument {', '.join(unknown)}"], arguments
+        effective = {a['name']: a['default'] for a in arguments if a['default'] is not None}
+        effective.update(overrides)
+        if 'launch_sitl' in declared:
+            effective['launch_sitl'] = 'false'
+        resolved = {'package': package, 'file': file, 'args': dict(overrides),
+                    'declared': sorted(declared), 'effective': effective}
+        return resolved, [], arguments
+
+    def _mode_problems(self, mode):
+        if mode not in MODES:
+            return ['the hub did not say whether this is SITL or HITL']
+        if mode == 'sitl' and not self.sim:
+            return ['this is a real drone and the hub is in SITL mode. Switch to HITL to fly it']
+        if mode == 'hitl' and self.sim:
+            return ['this is a SITL drone and the hub is in HITL mode. Switch to SITL to fly it']
+        return []
+
+    def _link_problems(self, snapshot):
+        """HITL only: what has to be connected before a real drone may fly. SITL has no RC,
+        and its PX4 link is the simulator's own.
+        """
+        if snapshot['nav_state'] is None:
+            return ['no vehicle_status from PX4. Check the XRCE-DDS agent and its link to the flight controller']
+        if snapshot['rc_lost'] is None:
+            return ['PX4 has not reported the RC link yet (no failsafe_flags)']
+        if snapshot['rc_lost']:
+            return ["no RC link. The safety pilot's transmitter must be on and bound"]
+        return []
+
+    def _start_problems(self, launch, mode):
         self._clear_finished_run()
+        problems = self._mode_problems(mode)
+        if problems:
+            return problems
         snapshot = self.flight.snapshot()
+        if mode == 'hitl':
+            problems = self._link_problems(snapshot)
+            if problems:
+                return problems
         if snapshot['airborne']:
             return ['drone is still airborne']
         # Only trust this from PX4 itself: without vehicle_status, armed is a cautious guess.

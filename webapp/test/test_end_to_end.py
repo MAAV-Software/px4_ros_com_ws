@@ -17,11 +17,11 @@ import websockets
 
 from swarm_launcher.agent import run_agent
 from swarm_launcher.flight_fake import FakeFlight
-from swarm_launcher.hub import create_app
+from swarm_launcher.hub import TaskHandle, create_app
 from swarm_launcher.hub_core import HubCore
-from swarm_launcher.manifest import load_missions
+from swarm_launcher.launch_library import fake_library
+from swarm_launcher.sitl_manager import FakeBackend, SitlManager
 
-MISSIONS = Path(__file__).resolve().parent.parent / 'missions'
 SPEED = 40.0
 
 
@@ -36,7 +36,7 @@ class AgentThread:
 
     def __init__(self, flight, url, runs_dir):
         self.loop = asyncio.new_event_loop()
-        self.main = self.loop.create_task(run_agent('drone1', flight, url, runs_dir))
+        self.main = self.loop.create_task(run_agent('drone1', flight, fake_library(), url, runs_dir))
         self.thread = threading.Thread(target=self._run, daemon=True)
 
     def _run(self):
@@ -59,8 +59,7 @@ class Stack:
         self.port = free_port()
         self.base = f'http://127.0.0.1:{self.port}'
         self.flight = flight or FakeFlight(speed=SPEED)
-        missions, _ = load_missions(MISSIONS)
-        self.core = HubCore(missions)
+        self.core = HubCore()
         self.agent = AgentThread(self.flight, f'ws://127.0.0.1:{self.port}/agent', tmp_path / 'runs')
         self.server = None
         self.server_thread = None
@@ -90,7 +89,8 @@ class Stack:
         return requests.get(f'{self.base}/api/state', timeout=2).json()
 
     def post(self, path, **body):
-        return requests.post(f'{self.base}/api/mission/{path}', json=body, timeout=2)
+        url = f'{self.base}{path}' if path.startswith('/') else f'{self.base}/api/mission/{path}'
+        return requests.post(url, json=body, timeout=2)
 
     def wait_for(self, condition, what, timeout=15.0):
         deadline = time.monotonic() + timeout
@@ -108,16 +108,29 @@ class Stack:
     def wait_for_state(self, name):
         return self.wait_for(lambda s: s['state'] == name, f'state {name}')
 
-    def to_ready(self, mission='m1_updown'):
-        assert self.post('select', mission_id=mission).status_code == 200
+    def select(self, file='updown_launch.py', **args):
+        return self.post('select', package='milestone1_singlevehicle', file=file, drones=['drone1'], args=args)
+
+    def to_ready(self, file='updown_launch.py', **args):
+        assert self.select(file, **args).status_code == 200
         return self.wait_for_state('ready')
 
 
-def test_missions_are_listed_without_launch_details(tmp_path):
+def test_the_drones_launch_files_and_arguments_reach_the_phone(tmp_path):
     with Stack(tmp_path) as stack:
-        missions = requests.get(f'{stack.base}/api/missions', timeout=2).json()
-        assert {m['id'] for m in missions} == {'m1_updown', 'm1_square', 'm1_full_path'}
-        assert all('launch' not in m for m in missions)
+        state = stack.wait_for(lambda s: 'drone1' in s['catalogs'], 'catalog')
+        assert [f['folder'] for f in state['catalogs']['drone1']] == [
+            'milestone1_singlevehicle', 'milestone3_multivehicle_anti-collision']
+        state = stack.to_ready(record='true')
+        assert state['mission']['args'] == {'record': 'true'}
+        assert 'arm_delay_s' in [argument['name'] for argument in state['launch_args']['args']]
+
+
+def test_a_file_that_is_not_built_fails_its_check(tmp_path):
+    with Stack(tmp_path) as stack:
+        stack.post('select', package='milestone3_multivehicle', file='collision_launch.py', drones=['drone1'])
+        state = stack.wait_for(lambda s: s['state'] == 'idle' and s['reason'], 'check failure')
+        assert 'not built' in state['checks']['drone1']['problems'][0]
 
 
 def test_full_mission_start_to_complete(tmp_path):
@@ -128,7 +141,7 @@ def test_full_mission_start_to_complete(tmp_path):
         assert state['committed']
         assert state['clock']['running'] and state['clock']['elapsed_ms'] >= 1500
         drone = state['drones'][0]
-        assert drone['role'] == 'search' and drone['airborne'] is True
+        assert drone['in_mission'] and drone['airborne'] is True
         state = stack.wait_for_state('complete')
         assert state['clock']['running'] is False
         assert state['drones'][0]['run_state'] == 'done'
@@ -159,7 +172,7 @@ def test_abort_hold_then_operator_chooses_land(tmp_path):
 def test_abort_during_countdown_keeps_the_drone_on_the_ground(tmp_path):
     flight = FakeFlight(speed=0.01)
     with Stack(tmp_path, flight) as stack:
-        stack.to_ready()
+        stack.to_ready(arm_delay_s='10')
         stack.post('start')
         stack.wait_for(lambda s: s['committed'] and s['drones'][0]['run_state'] == 'running', 'Go')
         stack.post('abort')
@@ -181,7 +194,7 @@ def test_a_retried_start_does_not_fire_twice(tmp_path):
 def test_failed_check_is_reported(tmp_path):
     flight = FakeFlight(speed=SPEED, problems=['no valid local position estimate yet'])
     with Stack(tmp_path, flight) as stack:
-        stack.post('select', mission_id='m1_updown')
+        stack.select()
         state = stack.wait_for(lambda s: s['state'] == 'idle' and s['reason'], 'check failure')
         assert state['checks']['drone1']['problems'] == ['no valid local position estimate yet']
 
@@ -221,8 +234,7 @@ def test_abort_still_works_after_the_hub_restarts_mid_flight(tmp_path):
         stack.post('start')
         stack.wait_for_state('searching')
         stack.stop_hub()
-        missions, _ = load_missions(MISSIONS)
-        stack.core = HubCore(missions)
+        stack.core = HubCore()
         stack.start_hub()
         state = stack.wait_for_state('searching')
         assert state['run_id'] and state['clock']['running']
@@ -263,3 +275,125 @@ def test_drone_flies_on_without_the_hub_and_the_hub_catches_up(tmp_path):
         stack.start_hub()
         state = stack.wait_for_state('complete')
         assert state['drones'][0]['run_state'] == 'done'
+
+
+def test_sitl_drones_from_the_fleet_tab_fly_and_go(tmp_path):
+    """SITL mode end to end: switch, add a SITL drone over HTTP, fly it, remove it."""
+    port = free_port()
+    url = f'ws://127.0.0.1:{port}/agent'
+
+    def start_agent(instance, drone_id):
+        flight = FakeFlight(speed=SPEED)
+        return TaskHandle(asyncio.ensure_future(
+            run_agent(drone_id, flight, fake_library(), url, tmp_path / 'runs', sim=True)))
+
+    saved = []
+    core = HubCore(sitl=SitlManager(FakeBackend(start_agent=start_agent)), save_mode=saved.append)
+    stack = Stack.__new__(Stack)
+    stack.port, stack.base, stack.core = port, f'http://127.0.0.1:{port}', core
+    stack.start_hub()
+    try:
+        stack.wait_for(lambda s: s['mode'] == 'hitl', 'the hub')
+        assert stack.post('/api/sitl/add').json()['reason'] == 'switch to SITL to add SITL drones'
+        assert stack.post('/api/mode', mode='sitl').status_code == 200 and saved == ['sitl']
+        assert stack.post('/api/sitl/add').status_code == 200
+        state = stack.wait_for(lambda s: s['sitl']['drones'] and s['sitl']['drones'][0]['state'] == 'ready',
+                               'SITL drone')
+        assert [(d['id'], d['sim']) for d in state['drones']] == [('sim1', True)]
+        stack.post('select', package='milestone1_singlevehicle', file='updown_launch.py', drones=['sim1'])
+        stack.wait_for_state('ready')
+        stack.post('start')
+        stack.wait_for_state('complete')
+        assert stack.post('/api/sitl/remove', drone_id='sim1').status_code == 200
+        stack.wait_for(lambda s: s['drones'] == [] and s['sitl']['drones'] == [], 'SITL drone to go')
+    finally:
+        stack.stop_hub()
+
+
+def test_voice_and_typed_commands_over_http(tmp_path):
+    """The phone's voice and typed-command calls, through the real server."""
+    import io
+    import wave
+
+    from swarm_launcher.voice import FakeRecognizer
+
+    clip = io.BytesIO()
+    with wave.open(clip, 'wb') as out:
+        out.setnchannels(1)
+        out.setsampwidth(2)
+        out.setframerate(16000)
+        out.writeframes(b'\0' * 16000)
+    with Stack(tmp_path) as stack:
+        stack.core.voice = FakeRecognizer('start mission')
+        reply = requests.post(f'{stack.base}/api/voice?command_id=v1', data=clip.getvalue(),
+                              headers={'Content-Type': 'audio/wav'}, timeout=5).json()
+        assert reply['ok'] and reply['heard'] == 'start mission' and reply['command'] == 'start'
+        bad = requests.post(f'{stack.base}/api/voice', data=b'nope', timeout=5)
+        assert bad.status_code == 409 and 'not a WAV clip' in bad.json()['reason']
+        typed = stack.post('/api/command', text='stop search', command_id='t1').json()
+        assert typed['command'] == 'abort' and typed['ok']
+        assert stack.state()['voice'] == {'available': True, 'reason': ''}
+
+
+def test_the_ca_is_offered_for_phones(tmp_path):
+    ca = tmp_path / 'ca.crt'
+    ca.write_text('-----BEGIN CERTIFICATE-----\n')
+    port = free_port()
+    stack = Stack.__new__(Stack)
+    stack.port, stack.base, stack.core = port, f'http://127.0.0.1:{port}', HubCore()
+    config = uvicorn.Config(create_app(stack.core, ca_path=ca), host='127.0.0.1', port=port, log_level='error')
+    stack.server = uvicorn.Server(config)
+    stack.server_thread = threading.Thread(target=stack.server.run, daemon=True)
+    stack.server_thread.start()
+    try:
+        stack.wait_for(lambda s: True, 'the hub')
+        reply = requests.get(f'{stack.base}/ca.crt', timeout=2)
+        assert reply.headers['content-type'] == 'application/x-x509-ca-cert'
+        assert reply.text.startswith('-----BEGIN CERTIFICATE-----')
+    finally:
+        stack.stop_hub()
+
+
+def test_phones_get_each_drones_trail(tmp_path):
+    from swarm_launcher.flight_fake import SITL_HOME
+    from swarm_launcher.grid import fit_around
+
+    with Stack(tmp_path) as stack:
+        assert stack.post('/api/area', corners=fit_around(*SITL_HOME)).status_code == 200
+        stack.to_ready()
+        stack.post('start')
+        stack.wait_for_state('searching')
+
+        async def read_phone():
+            async with websockets.connect(f'ws://127.0.0.1:{stack.port}/ws') as phone:
+                while True:
+                    message = json.loads(await asyncio.wait_for(phone.recv(), timeout=5))
+                    if message['type'] == 'trail' and message['points'].get('drone1'):
+                        return message
+
+        trail = asyncio.run(read_phone())
+        assert trail['full']
+        col, row = trail['points']['drone1'][0]
+        assert (round(col, 1), round(row, 1)) == (3.3, 3.3)
+        assert stack.state()['drones'][0]['color'] == 0
+
+
+def test_the_page_is_always_rechecked_but_its_scripts_can_be_cached(tmp_path):
+    """Otherwise a phone keeps running an old client after the hub is updated."""
+    web = tmp_path / 'web'
+    (web / 'assets').mkdir(parents=True)
+    (web / 'index.html').write_text('<!doctype html><script src="assets/index-abc.js"></script>')
+    (web / 'assets' / 'index-abc.js').write_text('')
+    port = free_port()
+    stack = Stack.__new__(Stack)
+    stack.port, stack.base, stack.core = port, f'http://127.0.0.1:{port}', HubCore()
+    config = uvicorn.Config(create_app(stack.core, web_dir=web), host='127.0.0.1', port=port, log_level='error')
+    stack.server = uvicorn.Server(config)
+    stack.server_thread = threading.Thread(target=stack.server.run, daemon=True)
+    stack.server_thread.start()
+    try:
+        stack.wait_for(lambda s: True, 'the hub')
+        assert requests.get(f'{stack.base}/', timeout=2).headers['cache-control'] == 'no-cache'
+        assert 'cache-control' not in requests.get(f'{stack.base}/assets/index-abc.js', timeout=2).headers
+    finally:
+        stack.stop_hub()

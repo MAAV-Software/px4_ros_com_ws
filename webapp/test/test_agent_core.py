@@ -7,22 +7,30 @@ from swarm_launcher import agent_core
 from swarm_launcher.agent_core import ABORTED, DONE, FAILED, IDLE, LANDING, PREPARED, RUNNING, Agent
 from swarm_launcher.flight_fake import CLIMB_S, FakeFlight
 from swarm_launcher.flight_state import NAVIGATION_STATE_AUTO_LOITER, NAVIGATION_STATE_AUTO_RTL, NAVIGATION_STATE_POSCTL
+from swarm_launcher.launch_library import FAKE_ARGUMENTS, fake_library
 
-LAUNCH = {'package': 'p', 'file': 'f.launch.py', 'args': {'arm_delay_s': '0'}, 'waypoints': None}
+LAUNCH = {'package': 'p', 'file': 'f.launch.py', 'args': {'arm_delay_s': '0'}}
+CATALOG = [{'folder': 'p_folder', 'package': 'p', 'files': [
+    {'file': 'f.launch.py', 'built': True}, {'file': 'g_launch.py', 'built': False}]}]
+
+
+def run_now(work):
+    work()
 
 
 class Harness:
-    def __init__(self, clock, runs_dir=None, **flight_options):
+    def __init__(self, clock, runs_dir=None, library=None, sim=True, **flight_options):
         self.clock = clock
         self.sent = []
         self.flight = FakeFlight(now=clock, **flight_options)
-        self.agent = Agent('d1', self.flight, self.sent.append, runs_dir=runs_dir, now=clock)
+        self.library = library or fake_library(CATALOG, run=run_now)
+        self.agent = Agent('d1', self.flight, self.sent.append, self.library, runs_dir=runs_dir, now=clock, sim=sim)
 
     def of_type(self, kind):
         return [message for message in self.sent if message['type'] == kind]
 
     def package(self, run_id='run1'):
-        self.agent.handle({'type': 'package', 'run_id': run_id, 'mission_id': 'm', 'launch': LAUNCH})
+        self.agent.handle({'type': 'package', 'mode': 'sitl', 'run_id': run_id, 'mission_id': 'm', 'launch': LAUNCH})
 
     def go(self, run_id='run1'):
         self.agent.handle({'type': 'go', 'run_id': run_id})
@@ -46,7 +54,7 @@ def drone(clock):
 
 def test_preflight_passes_problems_back(clock):
     harness = Harness(clock, problems=['no valid local position estimate yet'])
-    harness.agent.handle({'type': 'preflight', 'mission_id': 'm', 'launch': LAUNCH})
+    harness.agent.handle({'type': 'preflight', 'mode': 'sitl', 'mission_id': 'm', 'launch': LAUNCH})
     assert harness.of_type('preflight_result')[0]['problems'] == ['no valid local position estimate yet']
 
 
@@ -279,7 +287,7 @@ def test_will_not_start_on_a_drone_that_is_already_armed(clock):
     harness = Harness(clock)
     harness.flight.px4_armed = True
     harness.agent.tick()
-    harness.agent.handle({'type': 'preflight', 'mission_id': 'm', 'launch': LAUNCH})
+    harness.agent.handle({'type': 'preflight', 'mode': 'sitl', 'mission_id': 'm', 'launch': LAUNCH})
     assert harness.of_type('preflight_result')[-1]['problems'] == ['PX4 is already armed']
     harness.package()
     assert harness.of_type('package_ack')[-1]['problems'] == ['PX4 is already armed']
@@ -289,7 +297,7 @@ def test_cautious_armed_guess_does_not_block_a_start(clock):
     """Without vehicle_status, armed stays true after an abort on the ground. It must not lock the drone out."""
     harness = Harness(clock, reports_status=False)
     harness.flight.tracker.on_arm_ack()
-    harness.agent.handle({'type': 'preflight', 'mission_id': 'm', 'launch': LAUNCH})
+    harness.agent.handle({'type': 'preflight', 'mode': 'sitl', 'mission_id': 'm', 'launch': LAUNCH})
     assert harness.of_type('preflight_result')[-1]['problems'] == []
 
 
@@ -546,7 +554,7 @@ def test_new_mission_refused_while_airborne_after_abort(drone):
     drone.fly()
     drone.agent.handle({'type': 'abort'})
     drone.run_for(0.5)
-    drone.agent.handle({'type': 'preflight', 'mission_id': 'm', 'launch': LAUNCH})
+    drone.agent.handle({'type': 'preflight', 'mode': 'sitl', 'mission_id': 'm', 'launch': LAUNCH})
     assert drone.of_type('preflight_result')[-1]['problems'] == ['drone is still airborne']
 
 
@@ -555,7 +563,7 @@ def test_finished_run_clears_on_next_preflight(drone):
     drone.go()
     drone.run_for(100)
     assert drone.agent.run_state == DONE
-    drone.agent.handle({'type': 'preflight', 'mission_id': 'm', 'launch': LAUNCH})
+    drone.agent.handle({'type': 'preflight', 'mode': 'sitl', 'mission_id': 'm', 'launch': LAUNCH})
     assert drone.of_type('preflight_result')[-1]['problems'] == []
     assert drone.agent.run_state == IDLE
 
@@ -570,3 +578,129 @@ def test_a_second_run_flies_again(drone):
     drone.run_for(100)
     assert drone.agent.run_state == DONE
     assert drone.agent.run_id == 'run2'
+
+
+# --- Launch files from this drone's own src ---------------------------------------
+
+def preflight(harness, launch, check_id=7):
+    harness.agent.handle({'type': 'preflight', 'mode': 'sitl', 'check_id': check_id, 'mission_id': 'm', 'launch': launch})
+
+
+def test_catalog_goes_to_the_hub_when_asked_and_when_src_changes(clock):
+    catalog = [dict(CATALOG[0], files=list(CATALOG[0]['files']))]
+    harness = Harness(clock, library=fake_library(catalog, run=run_now))
+    harness.agent.handle({'type': 'catalog_request'})
+    assert harness.of_type('catalog')[-1]['folders'][0]['package'] == 'p'
+    harness.run_for(10)
+    assert len(harness.of_type('catalog')) == 1  # Nothing changed, so nothing more is sent.
+    catalog[0]['files'].append({'file': 'h_launch.py', 'built': True})
+    harness.run_for(agent_core.CATALOG_EVERY_S + 1)
+    files = [entry['file'] for entry in harness.of_type('catalog')[-1]['folders'][0]['files']]
+    assert files == ['f.launch.py', 'g_launch.py', 'h_launch.py']
+
+
+def test_preflight_answers_with_the_files_arguments(drone):
+    preflight(drone, LAUNCH)
+    result = drone.of_type('preflight_result')[0]
+    assert result['check_id'] == 7 and result['problems'] == []
+    assert [argument['name'] for argument in result['launch_args']] == [a['name'] for a in FAKE_ARGUMENTS]
+
+
+@pytest.mark.parametrize('launch, problem', [
+    ({'package': 'p', 'file': 'nope.launch.py'}, "no nope.launch.py for p in this drone's src"),
+    ({'package': 'q', 'file': 'f.launch.py'}, "no f.launch.py for q in this drone's src"),
+    ({'package': 'p', 'file': 'g_launch.py'}, 'p is not built here, or was built after the agent started'),
+    ({'package': 'p', 'file': 'f.launch.py', 'args': {'speed': '3'}}, 'f.launch.py has no argument speed'),
+    ({'package': 'p', 'file': 'f.launch.py', 'args': {'launch_sitl': 'true'}}, 'launch_sitl is set by the launcher'),
+    ({'package': 'p', 'file': 'f.launch.py', 'args': {'record': 'a\nb'}}, 'bad value for record'),
+])
+def test_preflight_refuses_what_this_drone_cannot_run(drone, launch, problem):
+    preflight(drone, launch)
+    assert drone.of_type('preflight_result')[0]['problems'] == [problem]
+
+
+def test_preflight_waits_for_the_arguments_to_be_read(clock):
+    queued = []
+    harness = Harness(clock, library=fake_library(CATALOG, run=queued.append))
+    preflight(harness, LAUNCH)
+    harness.run_for(1)
+    assert harness.of_type('preflight_result') == []
+    queued.pop()()
+    harness.run_for(0.5)
+    assert harness.of_type('preflight_result')[0]['problems'] == []
+
+
+def test_a_launch_file_that_cannot_be_read_is_a_start_problem(clock):
+    def broken(path):
+        raise RuntimeError('SyntaxError: invalid syntax')
+
+    library = fake_library(CATALOG, run=run_now)
+    library.describer = broken
+    harness = Harness(clock, library=library)
+    preflight(harness, LAUNCH)
+    assert harness.of_type('preflight_result')[0]['problems'] == [
+        'could not read its arguments: SyntaxError: invalid syntax']
+
+
+def test_the_launch_keeps_defaults_and_never_starts_the_simulator(drone):
+    drone.agent.handle({'type': 'package', 'mode': 'sitl', 'run_id': 'run1', 'mission_id': 'm',
+                        'launch': {'package': 'p', 'file': 'f.launch.py', 'args': {'record': 'true'}}})
+    launch = drone.agent.launch
+    assert launch['args'] == {'record': 'true'}
+    assert launch['effective']['record'] == 'true'
+    assert launch['effective']['launch_sitl'] == 'false'
+    assert launch['effective']['path'] == '/fake/share/resource/path.yaml'
+    assert 'topic_prefix' in launch['declared']
+
+
+def test_package_waits_for_nothing_and_refuses_unread_arguments(clock):
+    harness = Harness(clock, library=fake_library(CATALOG, run=lambda work: None))
+    harness.package()
+    assert harness.of_type('package_ack')[0]['problems'] == ['still reading the launch arguments. Check again']
+    assert harness.agent.run_state == IDLE
+
+
+# --- SITL or HITL ------------------------------------------------------------------
+
+def check(harness, mode):
+    harness.agent.tick()  # The pretend PX4 reports its status on the first tick.
+    harness.agent.handle({'type': 'preflight', 'check_id': 1, 'mode': mode, 'launch': LAUNCH})
+    return harness.of_type('preflight_result')[-1]['problems']
+
+
+@pytest.mark.parametrize('sim, mode, problem', [
+    (False, 'sitl', 'this is a real drone and the hub is in SITL mode. Switch to HITL to fly it'),
+    (True, 'hitl', 'this is a SITL drone and the hub is in HITL mode. Switch to SITL to fly it'),
+    (True, None, 'the hub did not say whether this is SITL or HITL'),
+])
+def test_a_drone_only_flies_in_its_own_mode(clock, sim, mode, problem):
+    assert check(Harness(clock, sim=sim), mode) == [problem]
+
+
+def test_the_package_is_checked_for_mode_too(clock):
+    harness = Harness(clock, sim=False)
+    harness.agent.handle({'type': 'package', 'mode': 'sitl', 'run_id': 'run1', 'mission_id': 'm', 'launch': LAUNCH})
+    assert 'Switch to HITL' in harness.of_type('package_ack')[0]['problems'][0]
+    assert harness.agent.run_state == IDLE
+
+
+def test_hitl_needs_the_rc_link(clock):
+    assert check(Harness(clock, sim=False, rc_lost=True), 'hitl') == [
+        "no RC link. The safety pilot's transmitter must be on and bound"]
+    assert check(Harness(clock, sim=False, rc_lost=None), 'hitl') == [
+        'PX4 has not reported the RC link yet (no failsafe_flags)']
+    assert check(Harness(clock, sim=False), 'hitl') == []
+
+
+def test_hitl_needs_px4_status_but_sitl_does_not(clock):
+    harness = Harness(clock, sim=False, reports_status=False)
+    assert 'no vehicle_status from PX4' in check(harness, 'hitl')[0]
+    assert check(Harness(clock, sim=True, reports_status=False, rc_lost=True), 'sitl') == []
+
+
+def test_the_agent_says_what_kind_of_drone_it_is(clock):
+    harness = Harness(clock, sim=False)
+    harness.agent.handle({'type': 'catalog_request'})
+    assert harness.of_type('catalog')[0]['sim'] is False
+    harness.agent.tick()
+    assert harness.of_type('status')[-1]['sim'] is False

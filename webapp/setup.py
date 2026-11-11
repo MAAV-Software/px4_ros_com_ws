@@ -1,5 +1,4 @@
 import os
-from glob import glob
 from setuptools import setup
 
 package_name = 'swarm_launcher'
@@ -23,7 +22,6 @@ setup(
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
-        (os.path.join('share', package_name, 'missions'), glob('missions/*.yaml')),
     ] + web_files(),
     install_requires=['setuptools'],
     tests_require=['pytest'],

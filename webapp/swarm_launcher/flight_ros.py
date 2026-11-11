@@ -9,7 +9,6 @@ import time
 
 import rclpy
 import yaml
-from ament_index_python.packages import get_package_share_directory
 from rclpy.executors import SingleThreadedExecutor
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSDurabilityPolicy, QoSHistoryPolicy
@@ -31,6 +30,7 @@ from swarm_launcher.flight_state import (
     ACTIVITY_WHEN_COMMANDED, AGENT_COMPONENT, ARMING_STATE_ARMED, COMMANDS, NAVIGATION_STATE_OFFBOARD,
     VEHICLE_CMD_COMPONENT_ARM_DISARM, VEHICLE_CMD_RESULT_ACCEPTED, FlightTracker, clean_log_line,
     launch_argv, log_level, versioned_topic)
+from swarm_launcher.grid import local_to_global
 from swarm_launcher.launch_process import LaunchProcess
 
 POSITION_MAX_AGE_S = 2.0
@@ -133,17 +133,21 @@ class RosFlight:
                 and self.tracker.nav_state != NAVIGATION_STATE_OFFBOARD):
             reason = ': no ground station connected' if self.gcs_lost else ''
             return [f'PX4 preflight checks are failing{reason}. See QGroundControl']
-        args = launch.get('args', {})
-        waypoints = launch.get('waypoints')
-        if not waypoints or args.get('relative_start') == 'true':
+        # The node makes the same check, but only once it is trying to arm.
+        args = launch.get('effective', {})
+        path = args.get('path')
+        if not path or args.get('relative_start') == 'true':
             return []
         try:
-            path = f"{get_package_share_directory(waypoints['package'])}/{waypoints['file']}"
             with open(path) as handle:
-                first_waypoint = yaml.safe_load(handle)['waypoints'][0]['pos']
+                waypoints = yaml.safe_load(handle)
             max_offset = float(args.get('max_start_offset_m', DEFAULT_MAX_START_OFFSET_M))
-        except (OSError, KeyError, IndexError, TypeError, ValueError, yaml.YAMLError) as error:
+        except (OSError, ValueError, yaml.YAMLError) as error:
             return [f'cannot read the waypoints file: {error}']
+        try:
+            first_waypoint = waypoints['waypoints'][0]['pos']
+        except (KeyError, IndexError, TypeError):
+            return []  # Some other kind of path file. The launch knows what to do with it.
         blocker = arm_blocker(position, first_waypoint, max_offset)
         return [blocker] if blocker else []
 
@@ -152,7 +156,7 @@ class RosFlight:
         self.commanded = None
         self.accepted_commands = set()
         self.process = LaunchProcess(
-            launch_argv(launch, self.topic_prefix, get_package_share_directory), now=self.now)
+            launch_argv(launch, self.topic_prefix, self.system_id), now=self.now)
         self.process.start()
 
     def stop(self):
@@ -203,10 +207,20 @@ class RosFlight:
                 'z': round(float(position.z), 1)},
             'battery_pct': self.battery_pct,
             'global_position_ok': bool(position is not None and position.xy_global),
+            'global': self._global(position),
             'gps_fix': self.gps_fix,
             'rc_lost': self.rc_lost,
             **self.tracker.summary(running, self.commanded),
         }
+
+    @staticmethod
+    def _global(position):
+        """Latitude and longitude from PX4's own reference, for the grid map."""
+        if position is None or not (position.xy_valid and position.xy_global):
+            return None
+        lat, lon = local_to_global(float(position.ref_lat), float(position.ref_lon),
+                                   float(position.x), float(position.y))
+        return {'lat': round(lat, 8), 'lon': round(lon, 8)}
 
     def drain_logs(self):
         lines = []

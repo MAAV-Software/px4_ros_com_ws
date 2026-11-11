@@ -8,18 +8,25 @@ is useless.
   ros2 run swarm_launcher agent --hub ws://192.168.1.10:8080/agent --drone-id drone1
   # Real fleet drone (PX4 namespace px4_1, MAV_SYS_ID 2):
   ros2 run swarm_launcher agent --hub ws://hub:8080/agent --drone-id drone2 --topic-prefix /px4_1 --system-id 2
+  # A SITL instance (the hub's Fleet tab starts these itself):
+  ros2 run swarm_launcher agent --drone-id sim2 --topic-prefix /px4_1 --system-id 2 --sim
   # No ROS or PX4 on this machine:
   python3 -m swarm_launcher.agent --hub ws://localhost:8080/agent --drone-id drone1 --fake
+
+The phone lists the launch files in --workspace's src (default ~/px4_ros_com_ws). Packages
+built after the agent started need it restarting, from a shell that has sourced them.
 """
 import argparse
 import asyncio
 import collections
 import json
+from pathlib import Path
 
 import websockets
 from websockets.exceptions import WebSocketException
 
 from swarm_launcher.agent_core import Agent
+from swarm_launcher.launch_library import fake_library, ros_library
 
 TICK_S = 0.5
 RECONNECT_S = 1.0
@@ -79,9 +86,9 @@ async def _tick_forever(agent):
         await asyncio.sleep(TICK_S)
 
 
-async def run_agent(drone_id, flight, url, runs_dir):
+async def run_agent(drone_id, flight, library, url, runs_dir, sim=False):
     link = HubLink()
-    agent = Agent(drone_id, flight, link.send, runs_dir=runs_dir)
+    agent = Agent(drone_id, flight, link.send, library, runs_dir=runs_dir, sim=sim)
     await asyncio.gather(_stay_connected(agent, link, url), _tick_forever(agent))
 
 
@@ -92,7 +99,11 @@ def main():
     parser.add_argument('--topic-prefix', default='',
                         help='PX4 topic prefix, e.g. /px4_1 for /px4_1/fmu/... (default: none)')
     parser.add_argument('--system-id', type=int, default=1, help="this PX4's MAV_SYS_ID")
+    parser.add_argument('--workspace', default='~/px4_ros_com_ws',
+                        help='ROS 2 workspace whose src holds the launch files to offer')
     parser.add_argument('--runs-dir', default='~/launcher_runs')
+    parser.add_argument('--sim', action='store_true',
+                        help='this drone is a SITL instance, so it only flies with the hub in SITL mode')
     parser.add_argument('--fake', action='store_true', help='pretend drone: no ROS or PX4 needed')
     parser.add_argument('--fake-speed', type=float, default=1.0)
     args = parser.parse_args()
@@ -100,11 +111,15 @@ def main():
     if args.fake:
         from swarm_launcher.flight_fake import FakeFlight
         flight = FakeFlight(speed=args.fake_speed)
+        library = fake_library()
     else:
         from swarm_launcher.flight_ros import RosFlight
         flight = RosFlight(args.drone_id, args.topic_prefix.rstrip('/'), args.system_id)
+        library = ros_library(Path(args.workspace).expanduser() / 'src')
     try:
-        asyncio.run(run_agent(args.drone_id, flight, args.hub, args.runs_dir))
+        # A pretend drone is a simulation too.
+        sim = args.sim or args.fake
+        asyncio.run(run_agent(args.drone_id, flight, library, args.hub, args.runs_dir, sim=sim))
     except KeyboardInterrupt:
         pass
     finally:

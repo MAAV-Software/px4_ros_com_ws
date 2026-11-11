@@ -119,20 +119,24 @@ def versioned_topic(prefix, name, message_type):
     return f'{prefix}/fmu/out/{name}{suffix}'
 
 
-def launch_argv(launch, topic_prefix, share_directory):
-    """The `ros2 launch` command for a manifest's launch section.
+def launch_argv(launch, topic_prefix, system_id):
+    """The `ros2 launch` command for a launch the agent has resolved.
 
-    share_directory is get_package_share_directory, passed in so this stays ROS-free.
+    Only the arguments the operator changed are passed, plus the ones the launcher always
+    sets when the file declares them: launch_sitl is false, because stopping a launch that
+    owns the simulator stops the simulator too, and topic_prefix and system_id are this
+    drone's own. That is what lets one launch file serve every drone, in SITL and HITL.
     """
-    argv = ['ros2', 'launch', launch['package'], launch['file']]
-    argv += [f'{key}:={value}' for key, value in launch.get('args', {}).items()]
+    declared = set(launch.get('declared', ()))
+    args = dict(launch.get('args', {}))
+    if 'launch_sitl' in declared:
+        args['launch_sitl'] = 'false'
     # ros2 launch refuses an argument with an empty value, and the launch default is no prefix.
-    if topic_prefix:
-        argv.append(f'topic_prefix:={topic_prefix}')
-    waypoints = launch.get('waypoints')
-    if waypoints:
-        argv.append(f"path:={share_directory(waypoints['package'])}/{waypoints['file']}")
-    return argv
+    if topic_prefix and 'topic_prefix' in declared:
+        args['topic_prefix'] = topic_prefix
+    if 'system_id' in declared:
+        args['system_id'] = str(system_id)
+    return ['ros2', 'launch', launch['package'], launch['file']] + [f'{key}:={value}' for key, value in args.items()]
 
 
 class FlightTracker:

@@ -17,9 +17,11 @@ OUTPUT_LINES = 2000
 
 
 class LaunchProcess:
-    def __init__(self, argv, now=time.monotonic):
+    def __init__(self, argv, now=time.monotonic, env=None, cwd=None):
         self.argv = argv
         self.now = now
+        self.env = env
+        self.cwd = cwd
         self.process = None
         self.lines = collections.deque(maxlen=OUTPUT_LINES)
         self.stop_requested_at = None
@@ -30,7 +32,7 @@ class LaunchProcess:
         # Its own session, so a signal to the agent doesn't reach the launch
         # directly and stop() can signal everything it started.
         self.process = subprocess.Popen(
-            self.argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            self.argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=self.env, cwd=self.cwd,
             text=True, errors='replace', bufsize=1, start_new_session=True)
         threading.Thread(target=self._read_output, daemon=True).start()
 
@@ -64,6 +66,23 @@ class LaunchProcess:
             self._signal_group(signal.SIGTERM)
         elif waited > INTERRUPT_GRACE_S + TERMINATE_GRACE_S and not self.kill_sent:
             self.kill_sent = True
+            self._signal_group(signal.SIGKILL)
+
+    def group_alive(self):
+        """Whether anything this process started is still running, itself included."""
+        if self.process is None:
+            return False
+        try:
+            os.killpg(self.process.pid, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+        return True
+
+    def kill_group(self):
+        """For what a stopped process left behind, such as the Gazebo a PX4 instance started."""
+        if self.process is not None:
             self._signal_group(signal.SIGKILL)
 
     def drain_lines(self):

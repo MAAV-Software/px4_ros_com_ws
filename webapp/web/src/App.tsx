@@ -1,13 +1,14 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { FleetTab } from './FleetTab';
-import { clockText, STATE_LABEL } from './format';
+import { clockText, MODE_LABEL, STATE_LABEL } from './format';
 import { LogTab } from './LogTab';
+import { MapTab } from './MapTab';
 import { MissionTab } from './MissionTab';
 import type { Hub } from './useHub';
 import { useHub, useTicker } from './useHub';
 import type { MissionState } from './types';
 
-const TABS = ['Mission', 'Fleet', 'Log'] as const;
+const TABS = ['Mission', 'Fleet', 'Map', 'Log'] as const;
 type Tab = (typeof TABS)[number];
 
 const STOPPABLE: MissionState[] = ['preflight', 'ready', 'starting', 'searching', 'landing'];
@@ -37,11 +38,41 @@ function AbortBar({ hub }: { hub: Hub }) {
   );
 }
 
+const ACTIVE: MissionState[] = ['starting', 'searching', 'landing', 'aborting', 'aborted'];
+
+// Keeps the phone's screen on through a run, so the timer and abort stay in view. Only over
+// HTTPS, like the microphone; the browser drops it when the page is hidden.
+function useWakeLock(active: boolean) {
+  useEffect(() => {
+    if (!active || !('wakeLock' in navigator)) return;
+    let lock: WakeLockSentinel | null = null;
+    let stopped = false;
+    const take = () => {
+      if (document.visibilityState !== 'visible') return;
+      navigator.wakeLock.request('screen').then(
+        (taken) => {
+          if (stopped) void taken.release();
+          else lock = taken;
+        },
+        () => undefined,
+      );
+    };
+    take();
+    document.addEventListener('visibilitychange', take);
+    return () => {
+      stopped = true;
+      document.removeEventListener('visibilitychange', take);
+      void lock?.release();
+    };
+  }, [active]);
+}
+
 export function App() {
   const hub = useHub();
   const [tab, setTab] = useState<Tab>('Mission');
   const now = useTicker(250);
   const { snapshot, linked, receivedAt } = hub;
+  useWakeLock(snapshot !== null && ACTIVE.includes(snapshot.state));
 
   const sinceReceived = now - receivedAt;
   // The timer keeps counting through a dropout, and the hub corrects it on reconnect.
@@ -56,6 +87,7 @@ export function App() {
       <header className="top">
         <strong className="top-name">{snapshot?.mission?.name ?? 'Swarm launcher'}</strong>
         <span className="top-state">
+          {snapshot && <span className={`mode-badge mode-badge-${snapshot.mode}`}>{MODE_LABEL[snapshot.mode]}</span>}
           {!linked && 'No link'}
           {linked && stateText}
           {clockShown ? `, ${clockText(elapsedMs)}` : ''}
@@ -65,8 +97,9 @@ export function App() {
         {!snapshot && <p className="quiet center">Connecting to the hub.</p>}
         {snapshot && tab === 'Mission' && <MissionTab hub={hub} snapshot={snapshot} elapsedMs={elapsedMs} />}
         {snapshot && tab === 'Fleet' && (
-          <FleetTab drones={snapshot.drones} offlineS={linked ? 0 : sinceReceived / 1000} phoneLinked={linked} />
+          <FleetTab hub={hub} snapshot={snapshot} offlineS={linked ? 0 : sinceReceived / 1000} />
         )}
+        {snapshot && tab === 'Map' && <MapTab hub={hub} snapshot={snapshot} />}
         {tab === 'Log' && <LogTab logs={hub.logs} />}
       </main>
       <AbortBar hub={hub} />
