@@ -62,8 +62,8 @@ values and pass the matching namespace and system-ID arguments.
 ### Paths and separation
 
 The full 22-waypoint path, square and up/down files are copied from milestone 1
-with milestone 2 names. Both drones use the same full path by default; `path_1`
-and `path_2` let them fly different files. Each file is interpreted in that
+with milestone 2 names. Both drones use the same full path by default; each
+launch takes its own `path`, so they can fly different files. Each file is interpreted in that
 vehicle's **own local NED frame**, not a shared global frame: x = north,
 y = east, z = down, negative z = altitude. The origin is where that PX4 local
 estimate initialized, normally close to the boot location.
@@ -185,48 +185,44 @@ cd ~/px4_ros_com_ws
 source /opt/ros/humble/setup.bash
 colcon build --symlink-install --packages-up-to milestone2_multivehicle
 source install/setup.bash
-ros2 launch milestone2_multivehicle updown_launch.py headless:=false
+```
+
+Each launch file flies **one** vehicle and starts no simulator, so the same
+files run in SITL and on real drones. A two-drone run is two launches, one per
+vehicle. The easiest way is the web launcher (`webapp/README.md`): in SITL mode,
+add two SITL drones on its Fleet tab, pick a launch file in this folder, tick both
+drones and press Start. It runs the file on each drone with that drone's
+`topic_prefix` and `system_id`, and only sends Go once both have passed their
+start checks.
+
+By hand, start the simulator, then each vehicle's launch in its own sourced terminal:
+
+```bash
+ros2 launch milestone2_multivehicle px4_sitl.launch.py headless:=false
+ros2 launch milestone2_multivehicle updown_launch.py
+ros2 launch milestone2_multivehicle updown_launch.py topic_prefix:=/px4_1 system_id:=2
 ```
 
 Open QGroundControl first so both PX4 instances can satisfy their configured
-GCS checks. Do not run another PX4, agent or Gazebo session at the same time.
-The launcher refuses to attach a new simulation to one already running.
+GCS checks. `px4_sitl.launch.py` refuses to attach a new simulation to one
+already running. It starts one UDP agent on port 8888, starts PX4 instance 0,
+waits for its local position, then starts instance 1 in the same world.
 
-The launch starts one UDP agent on port 8888, starts PX4 instance 0, waits
-for its local position, then starts instance 1 in the same world. It runs two
-readiness helpers (300 s timeout each) and starts both mission controllers only
-when both succeed. Processes run without extra terminal windows. PX4 and
-agent output is in `~/.ros/log/latest/`; controller progress is on screen.
-Ctrl-C stops processes belonging to this launch. With `launch_sitl:=false`,
-the external simulator/agents keep running when controllers stop.
+Each vehicle launch runs a readiness helper (300 s timeout) and starts its
+mission controller only once that vehicle's PX4 has a valid local position.
+Ctrl-C stops that vehicle's controller only. By hand, nothing starts the two
+together: start the second launch straight after the first.
 
 Use `square_launch.py` next, then `offboard_solution.launch.py` for the full path.
 
 | Argument | Default | Purpose |
 |---|---|---|
-| `launch_sitl` | `true` | Start sim and agent; `false` for external SITL or hardware |
-| `headless` | `true` | `false` opens Gazebo GUI |
-| `px4_dir` | `~/PX4-Autopilot` | Built PX4 source checkout |
-| `path` | Installed full path (up/down or square in wrappers) | Common default for both vehicles |
-| `path_1`, `path_2` | `path` | Independent path overrides |
-| `namespace_1`, `namespace_2` | `/`, `/px4_1` | Actual DDS namespace prefixes |
-| `system_id_1`, `system_id_2` | `1`, `2` | Actual MAV_SYS_ID; overrides for external SITL/hardware |
+| `path` | Installed full path (up/down or square in wrappers) | This vehicle's waypoint file |
+| `topic_prefix` | empty | This vehicle's DDS namespace prefix, e.g. `/px4_1`; empty for bare `/fmu` topics |
+| `system_id` | `1` | This vehicle's MAV_SYS_ID, which its commands target |
 
-All mission launches accept these arguments. Built-in SITL requires target
-IDs 1 and 2. Equal namespaces or equal system IDs are rejected before startup.
-Both files are validated before any mission controller starts.
-
-SITL only, for recording and isolated-controller tests:
-
-```bash
-ros2 launch milestone2_multivehicle px4_sitl.launch.py headless:=false
-```
-
-Then launch the pair in another sourced terminal:
-
-```bash
-ros2 launch milestone2_multivehicle offboard_solution.launch.py launch_sitl:=false
-```
+All three launch files take exactly these arguments. A bad path, prefix or
+system ID is rejected before anything starts.
 
 The simulator applies the same limits to both PX4 instances:
 `MPC_XY_VEL_MAX=2`, `MPC_Z_VEL_MAX_UP=1`, `MPC_Z_VEL_MAX_DN=1` (m/s) and
@@ -273,7 +269,7 @@ it with airframe identity. Run `m2_analyze` twice with the matching path and
 | Problem | Check |
 |---|---|
 | Only one drone moves | Target system IDs and namespace overrides; inspect commands on both topics |
-| PX4/Gazebo already running | Use `launch_sitl:=false` for a correctly configured existing pair; otherwise stop the previous session |
+| PX4/Gazebo already running | The vehicle launches never start a simulator; stop the previous `px4_sitl.launch.py` session, or the web launcher's SITL drones, before starting another |
 | No topics for vehicle 1 | Instance 0 readiness, second PX4 log, agent connection, explicit DDS namespace |
 | No arm / mode accepted | QGroundControl connection, PX4 preflight checks, 10 Hz streams and actual MAV_SYS_ID |
 | Local position never received / RTPS size error | Firmware and px4_msgs schema/versioned topic compatibility |
@@ -300,7 +296,7 @@ required because this milestone has no anti-collision controller.
   takeover capability for each vehicle; check Offboard-loss and RC-loss policies
 - [ ] Bench-check identity/routing with props removed, then fly each airframe alone
 - [ ] Apply/review the agreed speed and yaw limits on both real flight controllers;
-  `launch_sitl:=false` does not set hardware parameters
+  the launch files set no PX4 parameters
 
 Hardware transport settings and the required physical separation depend on the
 airframes/site and must be recorded by the team; the simulator's 20 m spawn
@@ -309,19 +305,21 @@ One UDP agent can serve both clients; serial links need the agent setup
 appropriate to each link. Start those hardware agents externally.
 
 Example, **after** configuring clients with namespaces `drone_a` / `drone_b`
-and system IDs 11 / 12:
+and system IDs 11 / 12, one launch per vehicle:
 
 ```bash
 ros2 launch milestone2_multivehicle offboard_solution.launch.py \
-  launch_sitl:=false namespace_1:=/drone_a namespace_2:=/drone_b \
-  system_id_1:=11 system_id_2:=12 \
-  path_1:=/absolute/path/airframe_a.yaml path_2:=/absolute/path/airframe_b.yaml
+  topic_prefix:=/drone_a system_id:=11 path:=/absolute/path/airframe_a.yaml
+ros2 launch milestone2_multivehicle offboard_solution.launch.py \
+  topic_prefix:=/drone_b system_id:=12 path:=/absolute/path/airframe_b.yaml
 ```
 
+With the web launcher in HITL mode, each drone's agent runs its launch with the
+`--topic-prefix` and `--system-id` it was started with.
+
 Each safety pilot takes over at the first unexpected motion. A stopped mission
-controller relies on PX4's configured failsafe. Stopping the pair launch stops
-both controllers; for the one-controller-loss test use separate controller
-terminals as described in `testing.md`.
+controller relies on PX4's configured failsafe. Stopping one vehicle's launch
+stops only that controller.
 
 #### Real-flight pass criteria
 

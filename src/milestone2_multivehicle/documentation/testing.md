@@ -83,7 +83,9 @@ showing both airborne/Offboard during overlapping time.
 1. Open QGroundControl; ensure no older PX4/agent/Gazebo run remains.
 2. Start `ros2 launch milestone2_multivehicle px4_sitl.launch.py headless:=false`.
 3. Check both topic sets, record a bag (commands in the test guide).
-4. Start `ros2 launch milestone2_multivehicle offboard_solution.launch.py launch_sitl:=false`.
+4. Start `ros2 launch milestone2_multivehicle offboard_solution.launch.py`, and in a
+   second terminal the same with `topic_prefix:=/px4_1 system_id:=2`. (Or use the web
+   launcher's SITL mode, which starts both together.)
 5. Watch both nodes log waypoint/hold progression independently and request land.
 6. Confirm both aircraft land and disarm; stop recording, then stop the launch.
 7. Retrieve each `.ulg` from `rootfs/0/fs/log/` and `rootfs/1/fs/log/` under
@@ -91,7 +93,7 @@ showing both airborne/Offboard during overlapping time.
 8. Record pair-level observations and inspect oscillation/route separation manually.
 
 Use up/down and square launches before the full path. For different mission
-lengths, pass `path_1` as the up/down YAML and `path_2` as the full-path YAML.
+lengths, pass the up/down YAML as `path` to one vehicle's launch and the full-path YAML to the other's.
 The second mission must keep progressing after the first aircraft lands.
 
 ## 4. Failure and isolation tests
@@ -135,10 +137,11 @@ passes. It does not replace a clean full-path acceptance run.
 
 ### Readiness failure (M7)
 
-With only one external PX4 running, start the pair with `launch_sitl:=false`.
-After the 300 s timeout, the launch must stop without starting either mission
-controller or arming either vehicle. Repeat with the other vehicle missing.
-Unit tests cover the same gate without waiting five minutes.
+Start one vehicle's launch with no PX4 running for it. After the 300 s timeout,
+the launch must stop without starting its mission controller or arming. Unit tests
+cover the same gate without waiting five minutes. Across two vehicles, the web
+launcher provides the pair gate: it sends Go only once every ticked drone has
+passed its start checks, and stops the others if one launch fails before arming.
 
 ### Routing / graph checks (M1)
 

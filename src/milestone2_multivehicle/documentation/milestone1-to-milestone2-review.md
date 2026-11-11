@@ -55,6 +55,10 @@ The pair launch uses fixed logical labels 0 and 1. Its `namespace_1/2` and
 `system_id_1/2` arguments override routing for those labels on hardware.
 The launch's built-in simulation uses PX4 instances 0/1, system IDs 1/2.
 
+Changed on 2026-11-10: each launch file now flies one vehicle, set by `topic_prefix`
+and `system_id`, and none starts a simulator, so the same files run in SITL and on
+hardware. See the main guide.
+
 ## Review and validation
 
 - [ ] Build using `colcon build --packages-up-to milestone2_multivehicle`

@@ -216,123 +216,74 @@ def test_readiness_only_accepts_valid_selected_vehicle(api):
 
 def launch_context(**overrides):
     return SimpleNamespace(is_shutdown=False, values={
-        'launch_sitl': 'false', 'headless': 'true', 'px4_dir': '/tmp/PX4',
-        'namespace_1': '/', 'namespace_2': '/px4_1',
-        'system_id_1': '1', 'system_id_2': '2', 'path_1': PATH, 'path_2': PATH, **overrides})
+        'topic_prefix': '', 'system_id': '1', 'path': PATH, **overrides})
 
 
 def gate_actions(api, context):
     launch = api('launch/offboard_solution.launch.py')
-    actions = launch.launch_pair(context)
+    actions = launch.launch_vehicle(context)
     handlers = [a.args[0] for a in actions if type(a).__name__ == 'RegisterEventHandler']
     return actions, handlers
 
 
-@pytest.mark.parametrize('order', [(0, 1), (1, 0)])
-def test_pair_starts_only_when_both_are_ready(api, order):
-    context = launch_context()
+@pytest.mark.parametrize('prefix, system_id, namespace', [
+    ('', '1', '/'), ('/px4_1', '2', '/px4_1'), ('/drone_b', '12', '/drone_b')])
+def test_controller_starts_only_once_its_px4_is_ready(api, prefix, system_id, namespace):
+    context = launch_context(topic_prefix=prefix, system_id=system_id)
     actions, handlers = gate_actions(api, context)
     waiters = [a for a in actions if type(a).__name__ == 'Node']
-    assert [w.executable for w in waiters] == ['m2_wait_ready', 'm2_wait_ready']
-    assert handlers[order[0]].on_exit(SimpleNamespace(returncode=0), context) == []
-    result = handlers[order[1]].on_exit(SimpleNamespace(returncode=0), context)
+    assert [w.executable for w in waiters] == ['m2_wait_ready']
+    assert len(handlers) == 1
+    result = handlers[0].on_exit(SimpleNamespace(returncode=0), context)
     controllers = [a for a in result if type(a).__name__ == 'Node']
-    assert [c.name for c in controllers] == ['offboard_control_0', 'offboard_control_1']
-    assert [c.parameters[0]['target_system_id'] for c in controllers] == [1, 2]
-    assert len({c.parameters[0]['topic_namespace'] for c in controllers}) == 2
+    assert [c.name for c in controllers] == [f'offboard_control_{system_id}']
+    params = controllers[0].parameters[0]
+    assert params['target_system_id'] == int(system_id)
+    assert params['topic_namespace'] == namespace
+    assert params['waypoints_file'] == PATH
+    assert waiters[0].parameters[0]['topic_namespace'] == namespace
 
 
-@pytest.mark.parametrize('order', [(0, 1), (1, 0)])
-def test_timeout_starts_no_missions_even_if_peer_later_ready(api, order):
+def test_timeout_starts_no_mission(api):
     context = launch_context()
     _, handlers = gate_actions(api, context)
-    result = handlers[order[0]].on_exit(SimpleNamespace(returncode=1), context)
+    result = handlers[0].on_exit(SimpleNamespace(returncode=1), context)
     assert any(type(a).__name__ == 'EmitEvent' for a in result)
     assert not any(type(a).__name__ == 'Node' for a in result)
-    assert handlers[order[1]].on_exit(SimpleNamespace(returncode=0), context) == []
 
 
-def test_shutdown_never_starts_controllers(api):
+def test_shutdown_never_starts_the_controller(api):
     context = launch_context()
     _, handlers = gate_actions(api, context)
     context.is_shutdown = True
-    assert all(h.on_exit(SimpleNamespace(returncode=0), context) == [] for h in handlers)
+    assert handlers[0].on_exit(SimpleNamespace(returncode=0), context) == []
 
 
 @pytest.mark.parametrize('bad', [
-    {'namespace_2': '/'}, {'system_id_2': '1'},
-    {'launch_sitl': 'true', 'system_id_2': '12'}, {'path_2': '/missing/path.yaml'},
+    {'system_id': '0'}, {'system_id': '256'}, {'system_id': 'two'},
+    {'topic_prefix': '/bad name'}, {'path': '/missing/path.yaml'},
 ])
-def test_bad_pair_rejected_before_actions_return(api, bad):
+def test_bad_vehicle_rejected_before_actions_return(api, bad):
     with pytest.raises((ValueError, OSError)):
         gate_actions(api, launch_context(**bad))
 
 
 @pytest.mark.parametrize('field,value', [('yaw', math.nan), ('hold_s', math.inf),
                                         ('pos', [0, 0, math.nan])])
-def test_nonfinite_second_path_rejected_before_either_mission(api, tmp_path, field, value):
+def test_nonfinite_path_rejected_before_the_mission(api, tmp_path, field, value):
     data = yaml.safe_load(Path(PATH).read_text())
     data['waypoints'][0][field] = value
     path = tmp_path / 'bad.yaml'
     path.write_text(yaml.safe_dump(data))
     with pytest.raises(ValueError, match='finite'):
-        gate_actions(api, launch_context(path_2=str(path)))
+        gate_actions(api, launch_context(path=str(path)))
 
 
-def test_different_path_files_and_hardware_ids_reach_each_controller(api):
-    path2 = str(ROOT / 'resource/milestone2_updown.yaml')
-    context = launch_context(path_2=path2, namespace_1='/drone_a', namespace_2='/drone_b',
-                             system_id_1='11', system_id_2='12')
-    _, handlers = gate_actions(api, context)
-    handlers[0].on_exit(SimpleNamespace(returncode=0), context)
-    controllers = [a for a in handlers[1].on_exit(SimpleNamespace(returncode=0), context)
-                   if type(a).__name__ == 'Node']
-    assert [c.parameters[0]['waypoints_file'] for c in controllers] == [PATH, path2]
-    assert [c.parameters[0]['target_system_id'] for c in controllers] == [11, 12]
-
-
-def test_sitl_starts_one_agent_then_second_px4_after_first_ready(api, tmp_path, monkeypatch):
-    launch = api('launch/px4_sitl.launch.py')
-    binary = tmp_path / 'build/px4_sitl_default/bin/px4'
-    binary.parent.mkdir(parents=True)
-    binary.touch()
-    binary.chmod(0o755)
-    monkeypatch.setattr(launch.subprocess, 'run', lambda *a, **k: SimpleNamespace(returncode=1))
-    context = launch_context(px4_dir=str(tmp_path))
-    actions = launch.start_sitl(context)
-    assert len([a for a in actions if type(a).__name__ == 'ExecuteProcess']) == 1
-    nodes = [a for a in actions if type(a).__name__ == 'Node']
-    assert [n.name for n in nodes] == ['m2_px4_0', 'm2_wait_world']
-    ready_handler = actions[0].args[0]
-    second = ready_handler.on_exit(SimpleNamespace(returncode=0), context)[0]
-    assert second.name == 'm2_px4_1'
-    assert nodes[0].additional_env['PX4_UXRCE_DDS_NS'] == ''
-    assert second.additional_env['PX4_UXRCE_DDS_NS'] == 'px4_1'
-    assert second.additional_env['PX4_GZ_STANDALONE'] == '1'
-    assert second.additional_env['PX4_GZ_MODEL_POSE'] == '20,0,0'
-    failure = ready_handler.on_exit(SimpleNamespace(returncode=1), context)
-    assert not any(type(a).__name__ == 'Node' for a in failure)
-
-
-def test_same_basename_logs_produce_separate_vehicle_reports(api, monkeypatch, tmp_path):
-    analyzer = api('milestone2_multivehicle/analyze_flight.py')
-    monkeypatch.setattr(analyzer, 'read_flight', lambda _: (
-        object(), {'log': 'flight.ulg', 'date': '2026-10-13', 'px4': 'test'}))
-    monkeypatch.setattr(analyzer.scoring, 'score_flight',
-                        lambda *a: SimpleNamespace(overall='PASS'))
-    monkeypatch.setattr(analyzer.scoring, 'format_markdown',
-                        lambda report, meta: f'Vehicle {meta["vehicle"]}')
-    monkeypatch.setattr(analyzer.scoring, 'report_to_dict', lambda report, meta: meta)
-    for vehicle in ('0', '1'):
-        assert analyzer.main(['flight.ulg', '--vehicle', vehicle,
-                              '--path', PATH, '--out', str(tmp_path)]) == 0
-    assert len(list(tmp_path.glob('*.json'))) == 2
-    assert (tmp_path / 'vehicle_0_flight_sitl.md').read_text() == 'Vehicle 0'
-    assert (tmp_path / 'vehicle_1_flight_sitl.md').read_text() == 'Vehicle 1'
-
-
-def test_controller_paths_do_not_require_scoring_metadata(api, tmp_path):
-    path = tmp_path / 'mission.yaml'
-    path.write_text('waypoints:\n  - {pos: [0, 0, -3], yaw: 0, hold_s: 5}\n')
-    _, handlers = gate_actions(api, launch_context(path_1=str(path), path_2=str(path)))
-    assert len(handlers) == 2
+@pytest.mark.parametrize('name', ['offboard_solution.launch.py', 'square_launch.py', 'updown_launch.py'])
+def test_no_launch_file_starts_a_simulator(name):
+    """The same file has to run in SITL and on a real drone, so none may start SITL itself."""
+    text = (ROOT / 'launch' / name).read_text()
+    for word in ('launch_sitl', 'px4_sitl.launch.py', 'MicroXRCEAgent', 'headless'):
+        assert f"'{word}'" not in text  # As code would name it; the docstrings may mention it.
+    for argument in ('path', 'topic_prefix', 'system_id'):
+        assert f"'{argument}'" in text

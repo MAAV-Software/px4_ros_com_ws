@@ -5,6 +5,11 @@ Build PX4 first (make px4_sitl). Instance 0 starts the world; instance 1
 joins it after instance 0 publishes a valid local position. The second
 spawn is 20 m east in Gazebo world coordinates, separating the default
 5 m-wide local-NED routes. This is planned separation, not anti-collision.
+
+For running by hand only. The web launcher starts SITL drones from its Fleet tab
+instead, and leaves files named px4_sitl* out of its list. Then fly each vehicle with
+offboard_solution.launch.py (or a wrapper), adding topic_prefix:=/px4_1 system_id:=2
+for the second.
 """
 import os
 from pathlib import Path
