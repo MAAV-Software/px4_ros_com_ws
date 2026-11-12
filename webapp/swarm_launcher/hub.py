@@ -66,6 +66,10 @@ class SitlCommand(Command):
     drone_id: str = ''
 
 
+class LayoutCommand(Command):
+    layout: str
+
+
 class TextCommand(Command):
     text: str
 
@@ -172,6 +176,10 @@ def create_app(core, web_dir=None, background=(), ca_path=None):
     @app.post('/api/sitl/add')
     async def sitl_add(body: SitlCommand):
         return _respond(core.run_command(body.command_id, core.sitl_add))
+
+    @app.post('/api/sitl/layout')
+    async def sitl_layout(body: LayoutCommand):
+        return _respond(core.run_command(body.command_id, lambda: core.sitl_layout(body.layout)))
 
     @app.post('/api/sitl/remove')
     async def sitl_remove(body: SitlCommand):
@@ -333,9 +341,10 @@ def main():
 
     hub_url = f'ws://127.0.0.1:{args.port}/agent'
 
-    def start_fake_agent(instance, drone_id):
-        # Spaced like real SITL drones: 20 m east of the one before.
-        flight = FakeFlight(speed=args.fake_speed, origin=local_to_global(*SITL_HOME, 0, 20 * instance))
+    def start_fake_agent(instance, drone_id, spawn):
+        # Where a real SITL drone in the chosen layout would spawn.
+        east, north = spawn
+        flight = FakeFlight(speed=args.fake_speed, origin=local_to_global(*SITL_HOME, north, east))
         return TaskHandle(asyncio.ensure_future(
             run_agent(drone_id, flight, fake_library(), hub_url, args.runs_dir, sim=True)))
 

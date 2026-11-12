@@ -1,9 +1,10 @@
 """SITL drones started from the Fleet tab, all on the hub's machine.
 
 Each SITL drone is one PX4 instance and one agent started with --sim. They share one
-Micro XRCE-DDS agent and one Gazebo world, the same layout as milestone 2's
-px4_sitl.launch.py: instance 0 starts the world, and instance N joins it 20 m further
-east, with topics under /px4_N and MAV_SYS_ID N+1.
+Micro XRCE-DDS agent and one Gazebo world: instance 0 starts the world and instance N
+joins it, with topics under /px4_N and MAV_SYS_ID N+1. Where each one spawns is set by the
+layout picked on the Fleet tab before the first drone is added: a line 20 m apart east, as
+milestone 2's px4_sitl.launch.py does, or milestone 4's 20 m square.
 
 Instance 0 owns the world, so drones are added in order, each once the one before it
 is up (the hub checks that), and removed newest first. The real launch files never
@@ -26,6 +27,15 @@ from swarm_launcher.launch_process import LaunchProcess
 
 MAX_DRONES = 6
 SPACING_M = 20
+# Each layout's spawn points in Gazebo world metres (east, north), in instance order. They
+# have to match the spawn_x_N/spawn_y_N defaults of the launch files flown on them.
+LAYOUTS = {
+    'line': {'label': 'Line, 20 m apart east (milestones 2 and 3)',
+             'spawns': [(i * SPACING_M, 0) for i in range(MAX_DRONES)]},
+    'square': {'label': '20 m square (milestone 4)',
+               'spawns': [(0, 0), (SPACING_M, 0), (SPACING_M, SPACING_M), (0, SPACING_M)]},
+}
+DEFAULT_LAYOUT = 'line'
 XRCE_PORT = '8888'
 # The same limits milestone 2's SITL sets, and the HITL runbook asks of real drones. No GCS
 # link failsafe, since nothing needs QGroundControl open to fly a simulated drone.
@@ -56,6 +66,11 @@ def topic_prefix_for(instance):
     return '' if instance == 0 else f'/px4_{instance}'
 
 
+def spawn_for(layout, instance):
+    """(east, north) in metres where this instance spawns in this layout."""
+    return LAYOUTS[layout]['spawns'][instance]
+
+
 def line_level(line):
     """The level worth passing on to the hub's log, or None for routine output."""
     text = ANSI_ESCAPE.sub('', line).strip()
@@ -72,14 +87,29 @@ class SitlManager:
         self.now = now
         self.entries = []
         self.xrce = None
+        self.layout = DEFAULT_LAYOUT
+
+    def set_layout(self, layout):
+        """Pick where the next world's drones spawn. Fixed while any SITL drone is running."""
+        if layout not in LAYOUTS:
+            raise SitlError(f'no SITL layout {layout!r}')
+        if layout != self.layout and self.entries:
+            raise SitlError('stop every SITL drone before changing the layout')
+        self.layout = layout
+
+    def layouts(self):
+        return [{'id': name, 'label': layout['label'], 'max': len(layout['spawns'])}
+                for name, layout in LAYOUTS.items()]
 
     def add(self):
         """Start the next SITL drone and return its id."""
         if any(entry['stopping'] for entry in self.entries):
             raise SitlError('wait for the last SITL drone to stop')
-        if len(self.entries) >= MAX_DRONES:
-            raise SitlError(f'at most {MAX_DRONES} SITL drones')
+        limit = len(LAYOUTS[self.layout]['spawns'])
+        if len(self.entries) >= limit:
+            raise SitlError(f'at most {limit} SITL drones in this layout')
         instance = len(self.entries)
+        spawn = spawn_for(self.layout, instance)
         problems = self.backend.problems(first=instance == 0)
         if problems:
             raise SitlError('; '.join(problems))
@@ -89,8 +119,9 @@ class SitlManager:
         self.entries.append({
             'instance': instance,
             'drone_id': drone_id,
-            'px4': self.backend.start_px4(instance),
-            'agent': self.backend.start_agent(instance, drone_id),
+            'spawn': spawn,
+            'px4': self.backend.start_px4(instance, spawn),
+            'agent': self.backend.start_agent(instance, drone_id, spawn),
             'started_at': self.now(),
             'stopping': False,
             'exit': '',
@@ -158,6 +189,7 @@ class SitlManager:
         return [{
             'drone_id': entry['drone_id'],
             'instance': entry['instance'],
+            'spawn': list(entry['spawn']),
             'started_at': entry['started_at'],
             'state': 'stopping' if entry['stopping'] else 'exited' if entry['exit'] else 'running',
             'detail': entry['exit'],
@@ -205,7 +237,7 @@ class ProcessBackend:
     def start_xrce(self):
         return self._start(['MicroXRCEAgent', 'udp4', '-p', XRCE_PORT])
 
-    def start_px4(self, instance):
+    def start_px4(self, instance, spawn):
         run_dir = self.px4_dir / 'build/px4_sitl_default/rootfs' / str(instance)
         run_dir.mkdir(parents=True, exist_ok=True)
         env = dict(os.environ)
@@ -213,7 +245,7 @@ class ProcessBackend:
             'PX4_SYS_AUTOSTART': '4001',
             'PX4_SIM_MODEL': 'gz_x500',
             'PX4_GZ_WORLD': 'default',
-            'PX4_GZ_MODEL_POSE': f'{instance * SPACING_M},0,0',
+            'PX4_GZ_MODEL_POSE': f'{spawn[0]},{spawn[1]},0',
             # Instance 0 starts the world; the rest join it.
             'PX4_GZ_STANDALONE': '1' if instance else '',
             'PX4_UXRCE_DDS_NS': topic_prefix_for(instance).lstrip('/'),
@@ -228,7 +260,7 @@ class ProcessBackend:
         return self._start([str(self.binary), str(etc), '-i', str(instance), '-d', '-w', str(run_dir)],
                            env=env, cwd=str(self.px4_dir))
 
-    def start_agent(self, instance, drone_id):
+    def start_agent(self, instance, drone_id, spawn=None):
         return self._start([
             sys.executable, '-m', 'swarm_launcher.agent', '--hub', self.hub_url, '--drone-id', drone_id,
             '--topic-prefix', topic_prefix_for(instance), '--system-id', str(instance + 1),
@@ -320,7 +352,7 @@ class FakeHandle:
 
 
 class FakeBackend:
-    """No processes. `start_agent(instance, drone_id)` can return a handle for a pretend
+    """No processes. `start_agent(instance, drone_id, spawn)` can return a handle for a pretend
     drone, as `hub --fake-sitl` does; by default it returns an inert one.
     """
 
@@ -328,6 +360,7 @@ class FakeBackend:
         self.agent_starter = start_agent
         self.problem_list = list(problems)
         self.started = []
+        self.spawns = []
         self.strays_stopped = 0
 
     def problems(self, first):
@@ -337,13 +370,14 @@ class FakeBackend:
         self.started.append('xrce')
         return FakeHandle()
 
-    def start_px4(self, instance):
+    def start_px4(self, instance, spawn):
         self.started.append(f'px4 {instance}')
+        self.spawns.append(tuple(spawn))
         return FakeHandle()
 
-    def start_agent(self, instance, drone_id):
+    def start_agent(self, instance, drone_id, spawn):
         self.started.append(f'agent {drone_id}')
-        return self.agent_starter(instance, drone_id) if self.agent_starter else FakeHandle()
+        return self.agent_starter(instance, drone_id, spawn) if self.agent_starter else FakeHandle()
 
     def stop_strays(self):
         self.strays_stopped += 1

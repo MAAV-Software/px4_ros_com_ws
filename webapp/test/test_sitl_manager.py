@@ -36,8 +36,50 @@ def test_backend_problems_refuse_the_add(clock):
 def test_there_is_a_limit(manager):
     for _ in range(sitl_manager.MAX_DRONES):
         manager.add()
-    with pytest.raises(SitlError, match='at most'):
+    with pytest.raises(SitlError, match='at most 6'):
         manager.add()
+
+
+def test_the_line_layout_spaces_drones_20_m_east(manager, backend):
+    for _ in range(3):
+        manager.add()
+    assert backend.spawns == [(0, 0), (20, 0), (40, 0)]
+    assert [d['spawn'] for d in manager.view()] == [[0, 0], [20, 0], [40, 0]]
+
+
+def test_the_square_layout_matches_milestone_4s_corners(manager, backend):
+    """collision_launch.py's spawn_x_N/spawn_y_N defaults, in the same order."""
+    manager.set_layout('square')
+    for _ in range(4):
+        manager.add()
+    assert backend.spawns == [(0, 0), (20, 0), (20, 20), (0, 20)]
+    with pytest.raises(SitlError, match='at most 4 SITL drones in this layout'):
+        manager.add()
+
+
+def test_the_layout_is_fixed_while_any_drone_is_up(manager):
+    with pytest.raises(SitlError, match='no SITL layout'):
+        manager.set_layout('circle')
+    manager.add()
+    with pytest.raises(SitlError, match='stop every SITL drone'):
+        manager.set_layout('square')
+    manager.remove('sim1')
+    with pytest.raises(SitlError, match='stop every SITL drone'):
+        manager.set_layout('square')  # still stopping
+    manager.poll()
+    manager.set_layout('square')
+    assert manager.layout == 'square'
+
+
+def test_the_fake_agent_is_told_where_it_spawned(clock):
+    seen = []
+    backend = FakeBackend(start_agent=lambda *args: seen.append(args) or FakeHandle())
+    manager = SitlManager(backend, now=clock)
+    manager.set_layout('square')
+    manager.add()
+    manager.add()
+    manager.add()
+    assert seen[2] == (2, 'sim3', (20, 20))
 
 
 def test_removal_is_newest_first_because_the_first_runs_the_world(manager):
@@ -88,7 +130,7 @@ def test_a_crashed_px4_is_reported_once_and_kept_until_removed(manager):
     lines = manager.poll()
     assert lines == [('sim1', 'ERROR', 'PX4 exited with code -11')]
     assert manager.poll() == []
-    assert manager.view()[0] == {'drone_id': 'sim1', 'instance': 0, 'started_at': 1000.0,
+    assert manager.view()[0] == {'drone_id': 'sim1', 'instance': 0, 'spawn': [0, 0], 'started_at': 1000.0,
                                  'state': 'exited', 'detail': 'PX4 exited with code -11'}
     manager.remove('sim1')
     manager.poll()
@@ -149,8 +191,8 @@ def real(monkeypatch, tmp_path):
 
 
 def test_px4_instances_follow_milestone_2s_sitl_layout(real, tmp_path):
-    real.start_px4(0)
-    real.start_px4(2)
+    real.start_px4(0, (0, 0))
+    real.start_px4(2, (40, 0))
     first, third = Recorder.started
     build = (tmp_path / 'PX4').resolve() / 'build/px4_sitl_default'
     assert first.argv[1:] == [str(build / 'etc'), '-i', '0', '-d', '-w', str(build / 'rootfs/0')]
@@ -158,6 +200,11 @@ def test_px4_instances_follow_milestone_2s_sitl_layout(real, tmp_path):
     assert third.env['PX4_GZ_STANDALONE'] == '1' and third.env['PX4_UXRCE_DDS_NS'] == 'px4_2'
     assert third.env['PX4_GZ_MODEL_POSE'] == '40,0,0'
     assert third.env['HEADLESS'] == '1' and third.env['PX4_PARAM_NAV_DLL_ACT'] == '0'
+
+
+def test_px4_spawns_where_the_layout_says(real):
+    real.start_px4(2, (20, 20))
+    assert Recorder.started[0].env['PX4_GZ_MODEL_POSE'] == '20,20,0'
 
 
 def test_each_sitl_agent_is_told_who_it_is(real):

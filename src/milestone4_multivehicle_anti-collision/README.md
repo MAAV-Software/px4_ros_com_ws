@@ -26,8 +26,8 @@ ros2 launch milestone4_multivehicle collision_launch.py topic_prefix:=/px4_2 sys
 ros2 launch milestone4_multivehicle collision_launch.py topic_prefix:=/px4_3 system_id:=4
 ```
 
-The web launcher's SITL mode spawns its drones in a line 20 m apart, not in this
-square, so the head-on routes don't converge there yet. Defaults put instances 0–3 at
+In the web launcher, pick the **20 m square** spawn layout on the Fleet tab before
+adding the four SITL drones; its default line layout won't make the routes converge. Defaults put instances 0–3 at
 world XY `(0,0)`, `(20,0)`, `(20,20)`, `(0,20)`. The diagonal routes converge
 at `(10,10)` at 5 m altitude, then continue to the opposite corners. Equal
 holds do not synchronize departure; this is a convergence stress test, not

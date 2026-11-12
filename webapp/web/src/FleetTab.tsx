@@ -100,6 +100,8 @@ export function FleetTab({ hub, snapshot, offlineS }: { hub: Hub; snapshot: Snap
   // Each SITL drone joins the world the first one started, so they go newest first.
   const newest = live.length > 0 ? live[live.length - 1].drone_id : null;
   const starting = sitl.drones.some((entry) => entry.state === 'starting');
+  const layoutMax = sitl.layouts.find((layout) => layout.id === sitl.layout)?.max ?? Infinity;
+  const full = sitl.drones.length >= layoutMax;
   const pending = sitl.drones.filter((entry) => !snapshot.drones.some((drone) => drone.id === entry.drone_id));
 
   const run = async (path: string, body: object = {}) => {
@@ -116,16 +118,33 @@ export function FleetTab({ hub, snapshot, offlineS }: { hub: Hub; snapshot: Snap
         <section className="box">
           <h2>SITL drones</h2>
           <p className="quiet small">
-            Each one is a PX4 instance in a shared Gazebo world on the hub's computer, 20 m apart. They are removed
-            newest first, since the first one runs the world.
+            Each one is a PX4 instance in a shared Gazebo world on the hub's computer. They are removed newest first,
+            since the first one runs the world.
           </p>
+          <label className="field">
+            <span className="field-label small">Spawn layout</span>
+            <select
+              value={sitl.layout ?? ''}
+              disabled={!phoneLinked || sitl.drones.length > 0}
+              onChange={(event) => void run('/api/sitl/layout', { layout: event.target.value })}
+            >
+              {sitl.layouts.map((layout) => (
+                <option key={layout.id} value={layout.id}>
+                  {layout.label}, up to {layout.max}
+                </option>
+              ))}
+            </select>
+            {sitl.drones.length > 0 && (
+              <span className="quiet small">Stop all SITL drones to change where they spawn.</span>
+            )}
+          </label>
           <div className="row">
             <button
               className="button button-primary"
-              disabled={!phoneLinked || starting}
+              disabled={!phoneLinked || starting || full}
               onClick={() => void run('/api/sitl/add')}
             >
-              {starting ? 'Starting' : 'Add SITL drone'}
+              {starting ? 'Starting' : full ? 'Layout full' : 'Add SITL drone'}
             </button>
             {sitl.drones.length > 0 && (
               <button className="button" disabled={!phoneLinked} onClick={() => void run('/api/sitl/stop')}>

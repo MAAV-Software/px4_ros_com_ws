@@ -249,6 +249,18 @@ class HubCore:
         self.log('hub', 'INFO', f'starting SITL drone {drone_id}')
         return self._result(True)
 
+    def sitl_layout(self, layout):
+        if self.sitl is None:
+            return self._refused('this hub cannot start SITL drones')
+        if self.mode != 'sitl':
+            return self._refused('switch to SITL to change the SITL layout')
+        try:
+            self.sitl.set_layout(layout)
+        except SitlError as error:
+            return self._refused(str(error))
+        self.log('hub', 'INFO', f'SITL drones will spawn in the {layout} layout')
+        return self._result(True)
+
     def sitl_remove(self, drone_id):
         if self.sitl is None:
             return self._refused('this hub cannot start SITL drones')
@@ -443,7 +455,7 @@ class HubCore:
             'state': self.state,
             'reason': self.reason,
             'mode': self.mode,
-            'sitl': {'available': self.sitl is not None, 'drones': self._sitl_view()},
+            'sitl': self._sitl_snapshot(),
             'area': self.area.view() if self.area else None,
             'https': {'port': self.https_port} if self.https_port else None,
             'local_name': self.local_name,
@@ -557,6 +569,12 @@ class HubCore:
             return 'a run is using it. Finish or reset the run first'
         return ''
 
+    def _sitl_snapshot(self):
+        if self.sitl is None:
+            return {'available': False, 'drones': [], 'layout': None, 'layouts': []}
+        return {'available': True, 'drones': self._sitl_view(),
+                'layout': self.sitl.layout, 'layouts': self.sitl.layouts()}
+
     def _sitl_view(self):
         """The SITL manager's list, with each running drone's progress from its own reports."""
         if self.sitl is None:
@@ -575,7 +593,7 @@ class HubCore:
                     state = 'starting'
                     detail = 'waiting for a position' if drone_id in self.links else 'starting PX4'
             view.append({'drone_id': entry['drone_id'], 'instance': entry['instance'],
-                         'state': state, 'detail': detail})
+                         'spawn': entry['spawn'], 'state': state, 'detail': detail})
         return view
 
     def _new_mission(self, package, file, drones, args):
