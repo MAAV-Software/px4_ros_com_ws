@@ -224,14 +224,18 @@ class HubCore:
 
     def fit_area(self, drone_id):
         """SITL only: a north-south field with this drone just inside its south-west corner,
-        since simulated drones have no measured corners.
+        since simulated drones have no measured corners. A layout planned around the field
+        puts the field where that layout's routes expect it instead.
         """
         if self.mode != 'sitl' or not self._is_sim(drone_id):
             return self._refused('only for SITL drones. Type the measured corners for a real field')
         place = self._status(drone_id).get('global')
         if not place:
             return self._refused(f'{drone_id} has no global position yet')
-        return self.set_area(fit_around(place['lat'], place['lon']))
+        offset = self.sitl.field_offset(drone_id) if self.sitl is not None else None
+        if offset is None:
+            return self.set_area(fit_around(place['lat'], place['lon']))
+        return self.set_area(fit_around(place['lat'], place['lon'], *offset))
 
     def sitl_add(self):
         if self.mode != 'sitl':

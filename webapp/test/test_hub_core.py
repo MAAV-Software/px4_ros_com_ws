@@ -623,7 +623,7 @@ def test_sitl_drones_are_added_one_at_a_time(sitl_core, clock):
 
 
 def test_the_sitl_layout_is_picked_before_the_first_drone(sitl_core):
-    assert [layout['id'] for layout in sitl_core.snapshot()['sitl']['layouts']] == ['line', 'square']
+    assert [layout['id'] for layout in sitl_core.snapshot()['sitl']['layouts']] == ['line', 'square', 'south']
     assert sitl_core.sitl_layout('circle')['reason'] == "no SITL layout 'circle'"
     assert sitl_core.sitl_layout('square')['ok']
     assert sitl_core.snapshot()['sitl']['layout'] == 'square'
@@ -692,7 +692,7 @@ def test_sitl_errors_reach_the_log(sitl_core):
 
 # --- Search area -------------------------------------------------------------------
 
-from swarm_launcher.grid import fit_around  # noqa: E402
+from swarm_launcher.grid import Field, fit_around, parse_corners  # noqa: E402
 
 HOME = (47.397971057728974, 8.546163739800146)
 
@@ -739,6 +739,17 @@ def test_fitting_the_area_is_for_sitl_drones_only(sitl_core, core):
     assert 'only for SITL drones' in core.fit_area('d1')['reason']
     status(sitl_core, 'sim1', sim=True, **{'global': None})
     assert sitl_core.fit_area('sim1')['reason'] == 'sim1 has no global position yet'
+
+
+def test_a_field_layout_places_the_test_field_where_its_routes_expect(sitl_core):
+    assert sitl_core.sitl_layout('south')['ok']
+    assert sitl_core.sitl_add()['ok']
+    sitl_core.agent_connected('sim1', FakeLink())
+    status(sitl_core, 'sim1', sim=True, **{'global': {'lat': HOME[0], 'lon': HOME[1]}})
+    assert sitl_core.fit_area('sim1')['ok']
+    # sim1 spawns 1 m east of the south-west corner and 3 m south of the field.
+    assert sitl_core.area.corners == Field(parse_corners(fit_around(*HOME, 1, -3))).corners
+    assert not sitl_core.snapshot()['drones'][0]['grid']['on_field']
 
 
 # --- Trails and colours ------------------------------------------------------------

@@ -4,7 +4,8 @@ Each SITL drone is one PX4 instance and one agent started with --sim. They share
 Micro XRCE-DDS agent and one Gazebo world: instance 0 starts the world and instance N
 joins it, with topics under /px4_N and MAV_SYS_ID N+1. Where each one spawns is set by the
 layout picked on the Fleet tab before the first drone is added: a line 20 m apart east, as
-milestone 2's px4_sitl.launch.py does, or milestone 4's 20 m square.
+milestone 2's px4_sitl.launch.py does, milestone 4's 20 m square, or milestone 4's scan
+start, in a row just south of the competition field.
 
 Instance 0 owns the world, so drones are added in order, each once the one before it
 is up (the hub checks that), and removed newest first. The real launch files never
@@ -28,12 +29,17 @@ from swarm_launcher.launch_process import LaunchProcess
 MAX_DRONES = 6
 SPACING_M = 20
 # Each layout's spawn points in Gazebo world metres (east, north), in instance order. They
-# have to match the spawn_x_N/spawn_y_N defaults of the launch files flown on them.
+# have to match the spawn_x_N/spawn_y_N defaults of the launch files flown on them. A
+# layout planned around the competition field gives its south-west corner as field_sw, so
+# "Place a test field" puts the field where the routes expect it.
 LAYOUTS = {
     'line': {'label': 'Line, 20 m apart east (milestones 2 and 3)',
              'spawns': [(i * SPACING_M, 0) for i in range(MAX_DRONES)]},
     'square': {'label': '20 m square (milestone 4)',
                'spawns': [(0, 0), (SPACING_M, 0), (SPACING_M, SPACING_M), (0, SPACING_M)]},
+    # milestone4's scan_routes.SPAWNS: 3 m south of the field, each near its first row.
+    'south': {'label': 'South edge of the field (milestone 4 scan)',
+              'spawns': [(1, -3), (9, -3), (17, -3), (23, -3)], 'field_sw': (0, 0)},
 }
 DEFAULT_LAYOUT = 'line'
 XRCE_PORT = '8888'
@@ -101,6 +107,15 @@ class SitlManager:
     def layouts(self):
         return [{'id': name, 'label': layout['label'], 'max': len(layout['spawns'])}
                 for name, layout in LAYOUTS.items()]
+
+    def field_offset(self, drone_id):
+        """(east, north) metres of this drone's spawn from the field's south-west corner, when
+        the layout was planned around the field; otherwise None."""
+        field_sw = LAYOUTS[self.layout].get('field_sw')
+        entry = next((e for e in self.entries if e['drone_id'] == drone_id), None)
+        if field_sw is None or entry is None:
+            return None
+        return entry['spawn'][0] - field_sw[0], entry['spawn'][1] - field_sw[1]
 
     def add(self):
         """Start the next SITL drone and return its id."""
