@@ -24,8 +24,9 @@ async function post(url: string, body: BodyInit, type: string): Promise<HeardRes
 
 // The page is on plain HTTP, where browsers give it no microphone. Once per phone: install
 // the hub's own certificate authority, then use the HTTPS address.
-function HttpsHelp({ port }: { port: number }) {
-  const secure = `https://${location.hostname}:${port}${location.pathname}`;
+function HttpsHelp({ port, name }: { port: number; name: string | null }) {
+  // The announced name when there is one, since that is what people will type next time.
+  const secure = `https://${name ?? location.hostname}:${port}${location.pathname}`;
   return (
     <div className="small quiet">
       <p>Voice needs the HTTPS address. Once per phone:</p>
@@ -39,7 +40,7 @@ function HttpsHelp({ port }: { port: number }) {
           certificate.
         </li>
         <li>
-          Open <a href={secure}>{secure}</a>.
+          Open <a href={secure}>{secure}</a>. After that, this page moves there by itself.
         </li>
       </ol>
     </div>
@@ -131,7 +132,7 @@ export function VoiceBar({
         {phase === 'listening' ? 'Listening, let go to send' : phase === 'hearing' ? 'Hearing' : 'Hold to talk'}
       </button>
       {!window.isSecureContext && snapshot.https ? (
-        <HttpsHelp port={snapshot.https.port} />
+        <HttpsHelp port={snapshot.https.port} name={snapshot.local_name} />
       ) : (
         (said || problem) && <p className="quiet small">{said || problem}</p>
       )}

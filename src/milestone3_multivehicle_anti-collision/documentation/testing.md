@@ -86,10 +86,13 @@ ros2 bag record -o m3_avoidance_run01 \
   /px4_1/fmu/in/vehicle_command /px4_1/fmu/out/vehicle_command_ack_v1
 ```
 
-In a third sourced terminal:
+In two more sourced terminals, one vehicle each (or use the web launcher's SITL
+mode, which starts both together and keeps each controller running until both
+have landed):
 
 ```bash
-ros2 launch milestone3_multivehicle collision_launch.py launch_sitl:=false
+ros2 launch milestone3_multivehicle collision_launch.py system_id:=1
+ros2 launch milestone3_multivehicle collision_launch.py topic_prefix:=/px4_1 system_id:=2
 ```
 
 Use the default `(0,0)` and `(20,0)` origins for the demo. Verify instance 1

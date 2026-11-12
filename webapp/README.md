@@ -123,6 +123,25 @@ python3 webapp/tools/voice_noise_test.py --clips my_clips --noise props.wav --sn
 
 It prints what was heard at each speech-to-noise ratio and fails on any false start. The clips in `test/voice_clips` are synthetic (macOS `say`), so they only show the tool works.
 
+## Reaching the hub by name
+
+Phones and laptops on the same network can use **maavnetwork.local** instead of an address. The hub announces that name itself over mDNS, through avahi, which Ubuntu runs anyway. iPhones and Android 12+ find it with no DNS server, so it works on Drone 1's Wi-Fi in the field.
+
+- **Per network:** each of the hub's networks is announced with its own address, so a phone on Drone 1's Wi-Fi isn't handed the mesh radio's. A hotspot that comes up after the hub is picked up within 30 s.
+- **Why .local:** that ending is reserved for mDNS and never goes to the internet, so a phone can't be sent to someone else's site under the same name. Endings like `.mobile` are real public domains.
+- **Options:** `--name` changes the name, and `--name ''` turns it off. The hub's HTTPS certificate includes the name, so phones that trust the hub's CA trust it too.
+- **No port:** to have `http://maavnetwork.local` and `https://maavnetwork.local` work without `:8080` or `:8443`, run this once on the hub machine. It redirects ports 80 and 443 to the hub, which keeps running as a normal user:
+
+```bash
+sudo webapp/tools/serve_on_80_and_443.sh --persist
+```
+
+`--persist` keeps the redirects across reboots (it needs `iptables-persistent`), and `--remove` takes them away.
+
+A page opened over plain HTTP moves itself to HTTPS once the phone trusts the hub's CA, so that voice works. A phone that doesn't trust it yet stays on HTTP, where the talk button shows how to install the CA.
+
+The SITL VM is on a private network inside the Mac it runs on, so only that Mac can reach it, by name or by address. Trying the site from a phone needs the hub on a machine on the phone's network, as Drone 1 will be.
+
 ## HTTPS for phones
 
 Phones give a page the microphone and the screen wake lock only over HTTPS. The hub makes its own certificate authority the first time it runs, in `~/launcher_runs/tls`, and serves the site on both `http://<hub>:8080` and `https://<hub>:8443`. Agents keep using plain HTTP.
@@ -178,6 +197,7 @@ Checked on 2026-11-05 with PX4 v1.18.0-beta1 on an Ubuntu 22.04 ARM VM, Python 3
 | Bags | Recorded and closed cleanly, with the one-flag fix below |
 | Launch file picked on the phone (2026-11-10): `updown_launch.py` from `src`, `arm_delay_s` changed to 10 | Ran as `ros2 launch milestone1_singlevehicle updown_launch.py arm_delay_s:=10 launch_sitl:=false`. Armed after the delay, flew, Complete after disarm. The pick was still there after New mission |
 | Voice and the map (2026-11-11), Vosk small English model, HTTPS from this Mac with the hub's CA | A "start mission" clip over HTTPS heard correctly in 0.27 s. Without the CA, the certificate was refused. Two SITL drones with a test field: milestone 2's square traced 3 to 12 in both rows and columns (5 m), SITL 2 showed off the field's east edge and back. Voice turned off at takeoff, the recognizer unloaded, and voice came back after landing |
+| Milestone 3's collision test (2026-11-12): `collision_launch.py` on two SITL drones | SITL 2 passed 3 m from SITL 1, which braked, climbed to 10 m, waited, and came back down (log: BRAKE, CLIMB, WAIT, NORMAL). SITL 1 then finished its hold, moved 5 m north and landed. Complete in about 1.5 min, with no position dropouts and no launches left running. The first try found two bugs, below |
 | Two SITL drones added on the Fleet tab, then milestone 2's `offboard_solution.launch.py` on both (2026-11-11) | Each ready about 15 s after Add, in one world. Ran as `... offboard_solution.launch.py system_id:=1` and `... topic_prefix:=/px4_1 system_id:=2`. Both flew all 22 waypoints together, landed, Complete after both disarmed |
 
 **Not checked yet:** HITL on real hardware, an iPhone (the client ran in a phone-sized desktop browser), and removing a SITL drone or Stop all against real PX4 (only against pretend drones). The fix that keeps a failed run from showing Complete until PX4 disarms passed its tests but hasn't flown.
@@ -187,6 +207,8 @@ Checked on 2026-11-05 with PX4 v1.18.0-beta1 on an Ubuntu 22.04 ARM VM, Python 3
 - Stopping a launch signalled only `ros2 launch`, which doesn't forward SIGINT, so the flight node ran for 5 more seconds. An abort during the countdown let it arm the drone, which then flew a failsafe Return. A test from before this was found passed only because the abort came early. Fixed by signalling the whole process group.
 - PX4 goes back to Offboard after disarming, where its preflight result always fails. The new start check would have refused every mission after the first. Fixed by putting PX4 in Hold after a run.
 - An abort just after arming left the drone armed in Hold on the ground. It now disarms.
+- A drone's launch was stopped as soon as it landed. In milestone 3's collision test that cut off SITL 2's position, and SITL 1 held in the air waiting for it. Landed drones now keep their launches until the run is complete.
+- Stopped agents never exited. rclpy's own signal handlers shut ROS down but kept the process alive, so agents from an earlier hub reconnected under the same names, and the hub mixed their reports with the new drones'. Agents now start ROS without those handlers, and the hub listens only to the newest agent of a name and warns about the other.
 
 ## Limits to know about
 
@@ -205,7 +227,8 @@ On the Mission tab, pick a folder in `src`, then a launch file in its `launch/` 
 - **Arguments:** under Launch arguments, every argument the file declares, including ones from files it includes, unless the include sets them itself. Each shows its default as this drone works it out. An emptied field means the default, and only changed values are passed. Changing one runs the start checks again, and Start waits for them.
 - **Set by the launcher:** `launch_sitl` is always `false`, and `topic_prefix` and `system_id` are the agent's `--topic-prefix` and `--system-id`. None is listed, and the hub refuses them from a phone.
 - **Waypoints:** if the file declares `path`, the start checks read that waypoint file and refuse a drone too far from the first waypoint, as the offboard node would once it tried to arm. `relative_start:=true` or a negative `max_start_offset_m` turns that off.
-- **One drone or several:** each picked drone runs the file itself, with its own `topic_prefix` and `system_id`. Milestone 2's files fly one vehicle each, so they work for any number of drones. Milestone 3's still start nodes for several PX4 instances from one launch, so pick only one drone for those.
+- **One drone or several:** each picked drone runs the file itself, with its own `topic_prefix` and `system_id`. Milestone 2's files fly one vehicle each, so they work for any number of drones, as does milestone 3's `collision_launch.py` for its two. Milestone 3's other files still start nodes for several PX4 instances from one launch, so pick only one drone for those.
+- **Landed drones stay up for the others:** a drone that lands first keeps its launch running until the whole run is complete, as it would inside one launch that flies them all. Milestone 3's yield rule needs this: it holds a lower-priority drone wherever it is while a peer's position goes stale. The hub tells every drone to stop at Complete. Without a hub, a drone stops its launch 10 minutes after landing.
 - **Safety:** the phone only sends a package, a file and argument values. Each agent checks the file is in its own `src` and built, and that every argument is one the file declares, before anything runs. Values go to `ros2 launch` as plain arguments, never through a shell.
 
 After a run, New mission keeps the pick. Check again, then Start, to fly it again.

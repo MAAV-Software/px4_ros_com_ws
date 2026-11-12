@@ -20,6 +20,7 @@ import argparse
 import asyncio
 import collections
 import json
+import signal
 from pathlib import Path
 
 import websockets
@@ -92,7 +93,15 @@ async def run_agent(drone_id, flight, library, url, runs_dir, sim=False):
     await asyncio.gather(_stay_connected(agent, link, url), _tick_forever(agent))
 
 
+def _stop_on_sigterm():
+    """SIGTERM ends the agent the same way Ctrl-C does, so it stops its launch on the way out."""
+    def interrupt(signum, frame):
+        raise KeyboardInterrupt
+    signal.signal(signal.SIGTERM, interrupt)
+
+
 def main():
+    _stop_on_sigterm()
     parser = argparse.ArgumentParser(description='Drone agent for the swarm launcher')
     parser.add_argument('--hub', default='ws://localhost:8080/agent', help='hub agent URL')
     parser.add_argument('--drone-id', default='drone1')

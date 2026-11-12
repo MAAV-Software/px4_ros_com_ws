@@ -119,7 +119,10 @@ def test_full_flight_with_no_further_messages_from_the_hub(drone):
         seen.add(drone.agent.run_state)
     assert seen >= {RUNNING, LANDING, DONE}
     assert drone.agent.run_state == DONE
-    assert not drone.flight.launch_running  # The launch never ends by itself.
+    # Kept for the other drones in the run, then stopped by the drone itself.
+    assert drone.flight.launch_running
+    drone.run_for(agent_core.LINGER_AFTER_LANDING_S + 1)
+    assert not drone.flight.launch_running
     status = drone.of_type('status')[-1]
     assert status['airborne'] is False and status['armed'] is False
     assert status['waypoint_total'] == 6
@@ -307,6 +310,8 @@ def test_px4_is_taken_out_of_offboard_after_a_flight(drone):
     drone.go()
     drone.run_for(100)
     assert drone.agent.run_state == DONE
+    drone.agent.handle({'type': 'finish', 'run_id': 'run1'})
+    drone.run_for(1)
     assert drone.flight.commands_sent == ['hold']
     assert drone.flight.snapshot()['nav_state'] == NAVIGATION_STATE_AUTO_LOITER
 
@@ -704,3 +709,34 @@ def test_the_agent_says_what_kind_of_drone_it_is(clock):
     assert harness.of_type('catalog')[0]['sim'] is False
     harness.agent.tick()
     assert harness.of_type('status')[-1]['sim'] is False
+
+
+
+# --- A landed drone's launch, kept for the rest of the run ---------------------------
+
+def landed(drone):
+    drone.package()
+    drone.go()
+    drone.run_for(100)
+    assert drone.agent.run_state == DONE and drone.flight.launch_running
+
+
+def test_the_hub_says_when_the_run_is_over(drone):
+    landed(drone)
+    drone.agent.handle({'type': 'finish', 'run_id': 'another run'})
+    assert drone.flight.launch_running
+    drone.agent.handle({'type': 'finish', 'run_id': 'run1'})
+    assert not drone.flight.launch_running
+
+
+def test_finish_never_stops_a_drone_still_flying(drone):
+    drone.fly()
+    drone.agent.handle({'type': 'finish', 'run_id': 'run1'})
+    assert drone.flight.launch_running and drone.agent.run_state == RUNNING
+
+
+def test_the_next_mission_stops_a_launch_left_running(drone):
+    landed(drone)
+    drone.agent.handle({'type': 'preflight', 'mode': 'sitl', 'check_id': 2, 'launch': LAUNCH})
+    assert not drone.flight.launch_running and drone.agent.run_state == IDLE
+    assert drone.of_type('preflight_result')[-1]['problems'] == []

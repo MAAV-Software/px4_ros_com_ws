@@ -31,6 +31,12 @@ RECOVERY_RESEND_S = 10.0
 # How often src is looked at again, so a new launch file or a build shows up on the phone.
 CATALOG_EVERY_S = 5.0
 MODES = ('sitl', 'hitl')
+# A landed drone keeps its launch running until the whole run is over, as it would inside one
+# launch that flies every drone: its controller may be what the others are waiting on. Milestone
+# 3's yield rule holds a lower-priority drone wherever it is while a peer's position goes stale.
+# The hub says when the run is over (finish); without a hub, the drone stops it this long after
+# landing.
+LINGER_AFTER_LANDING_S = 600.0
 
 
 class Agent:
@@ -59,6 +65,7 @@ class Agent:
         self.catalog_sent = None
         self.catalog_checked = None
         self.pending_preflight = None
+        self.landed_at = None
         self.handlers = {
             'catalog_request': self._on_catalog_request,
             'preflight': self._on_preflight,
@@ -68,6 +75,7 @@ class Agent:
             'abort': self._on_abort,
             'recover': self._on_recover,
             'reset': self._on_reset,
+            'finish': self._on_finish,
         }
 
     # --- Messages from the hub --------------------------------------------------
@@ -140,6 +148,11 @@ class Agent:
     def _on_reset(self, message):
         self._clear_finished_run()
 
+    def _on_finish(self, message):
+        """Every drone in the run has landed, so this one's launch can stop."""
+        if message.get('run_id') == self.run_id and self.run_state in (DONE, FAILED):
+            self.flight.stop()
+
     # --- Time-driven work -------------------------------------------------------
 
     def tick(self):
@@ -154,6 +167,7 @@ class Agent:
             self._step_run()
         elif self.run_state == ABORTING:
             self._step_abort()
+        self._step_linger()
         self._step_recovery()
         self._step_armed_after_abort()
         self._step_leave_offboard()
@@ -187,7 +201,9 @@ class Agent:
         snapshot = self.flight.snapshot()
         if snapshot['landed_after_flight']:
             # The offboard node keeps spinning after it lands, so the launch never ends by itself.
-            self.flight.stop()
+            # It is stopped once the whole run is over: see LINGER_AFTER_LANDING_S.
+            if self.landed_at is None:
+                self.landed_at = self.now()
             self._end_clock()
             # Not done until PX4 disarms: until then the props may still spin.
             self.run_state = LANDING if snapshot['armed'] else DONE
@@ -205,6 +221,11 @@ class Agent:
         elif snapshot['landing']:
             self._end_clock()
             self.run_state = LANDING
+
+    def _step_linger(self):
+        if (self.run_state == DONE and self.landed_at is not None
+                and self.now() - self.landed_at > LINGER_AFTER_LANDING_S):
+            self.flight.stop()
 
     def _step_abort(self):
         """Order matters. Unarmed: stop the launch first, because the node would keep
@@ -441,6 +462,10 @@ class Agent:
                 self._clear_run()
 
     def _clear_run(self):
+        # A finished run's launch may still be running for the others; the run is over now.
+        if self.flight.snapshot()['launch_running']:
+            self.flight.stop()
+        self.landed_at = None
         self.run_state = IDLE
         self.run_id = None
         self.mission_id = None

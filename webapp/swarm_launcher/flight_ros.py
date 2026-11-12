@@ -54,7 +54,13 @@ class RosFlight:
         self.preflight_ok = None
         self.gcs_lost = None
 
-        rclpy.init()
+        # Not rclpy's own SIGINT/SIGTERM handlers: they shut ROS down but leave the process
+        # running, so a stopped agent lived on, still connected under its drone's name.
+        try:
+            from rclpy.signals import SignalHandlerOptions
+            rclpy.init(signal_handler_options=SignalHandlerOptions.NO)
+        except ImportError:
+            rclpy.init()
         self.node = Node(f'swarm_agent_{drone_id}')
         qos = QoSProfile(
             reliability=QoSReliabilityPolicy.BEST_EFFORT,
@@ -231,5 +237,6 @@ class RosFlight:
     def close(self):
         self.stop()
         self.executor.shutdown()
+        rclpy.try_shutdown()
         self.node.destroy_node()
         rclpy.try_shutdown()

@@ -113,6 +113,7 @@ export interface Snapshot {
   area: Area | null;
   voice: { available: boolean; reason: string };
   https: { port: number } | null;
+  local_name: string | null;
   mission: Mission | null;
   launch_args: { source: string; args: LaunchArg[] } | null;
   catalogs: Record<string, Folder[]>;

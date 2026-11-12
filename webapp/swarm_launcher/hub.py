@@ -23,11 +23,13 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from swarm_launcher.hub_core import MODES, HubCore
+from swarm_launcher.mdns import DEFAULT_NAME, MdnsName
 from swarm_launcher.run_store import RunStore
 from swarm_launcher.sitl_manager import FakeBackend, ProcessBackend, SitlManager
 from swarm_launcher.voice import DEFAULT_MODEL, FakeRecognizer, VoiceRecognizer, read_wav
 
 TICK_S = 0.25
+MDNS_REFRESH_S = 30.0
 # A 10 s clip of 16 kHz 16-bit audio is about 320 kB.
 MAX_VOICE_BYTES = 2_000_000
 SETTINGS_FILE = 'settings.json'
@@ -215,7 +217,7 @@ def create_app(core, web_dir=None, background=(), ca_path=None):
         pump_task = asyncio.ensure_future(pump())
         try:
             while True:
-                core.agent_message(drone_id, json.loads(await socket.receive_text()))
+                core.agent_message(drone_id, json.loads(await socket.receive_text()), send)
         except WebSocketDisconnect:
             pass
         finally:
@@ -314,6 +316,8 @@ def main():
                         help='Add SITL drone on the Fleet tab makes pretend drones, not PX4 instances')
     parser.add_argument('--fake-speed', type=float, default=1.0)
     parser.add_argument('--vosk-model', default=DEFAULT_MODEL, help='Vosk model folder, for voice commands')
+    parser.add_argument('--name', default=DEFAULT_NAME,
+                        help='announce this hub as NAME.local, so phones can type that (empty to turn off)')
     parser.add_argument('--https-port', type=int, default=8443,
                         help='also serve the site over HTTPS here, for the phone microphone (0 to turn off)')
     parser.add_argument('--https-host', action='append', default=[], metavar='NAME',
@@ -360,9 +364,22 @@ def main():
     ca_path = None
     if args.https_port:
         from swarm_launcher.tls import ensure_certificates, local_hosts
-        hosts = local_hosts(args.https_host)
+        hosts = local_hosts(args.https_host + ([f'{args.name}.local'] if args.name else []))
         cert, key, ca_path = ensure_certificates(Path(args.runs_dir).expanduser() / 'tls', hosts)
         core.https_port = args.https_port
+
+    mdns = MdnsName(args.name) if args.name else None
+    if mdns:
+        async def announce_name():
+            while True:
+                line = await asyncio.to_thread(mdns.refresh)
+                if line:
+                    core.log('hub', 'WARN' if mdns.problem else 'INFO', line)
+                    print(line)
+                core.local_name = None if mdns.problem or not mdns.published else mdns.name
+                await asyncio.sleep(MDNS_REFRESH_S)
+
+        background.append(announce_name)
 
     share = share_dir()
     app = create_app(core, args.web_dir or share / 'web' / 'dist', background, ca_path)
@@ -375,10 +392,17 @@ def main():
                                       lifespan='off', ssl_certfile=str(cert), ssl_keyfile=str(key)))
         print(f'  and https://<this machine>:{args.https_port} for phones. Certificate covers: {", ".join(hosts)}')
         print(f'  Phones install its CA once from http://<this machine>:{args.port}/ca.crt')
+    if args.name:
+        print(f'  Phones on the same network can use http://{args.name}.local:{args.port}'
+              + (f' or https://{args.name}.local:{args.https_port}' if args.https_port else '')
+              + ', or no port at all after tools/serve_on_80_and_443.sh')
     try:
         asyncio.run(serve_all(configs))
     except KeyboardInterrupt:
         pass
+    finally:
+        if mdns:
+            mdns.close()
 
 
 async def serve_all(configs):

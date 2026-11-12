@@ -46,6 +46,7 @@ SITL_START_TIMEOUT_S = 180.0
 # Each drone keeps its own colour slot while the hub knows it. The phone holds the colours;
 # past this many, a drone is drawn in ink.
 COLOR_SLOTS = 6
+DUPLICATE_WARN_S = 30.0
 # A trail point at most every this many metres, so hovering doesn't pile points up.
 TRAIL_STEP_M = 0.3
 TRAIL_MAX_POINTS = 20000
@@ -60,6 +61,7 @@ class HubCore:
         self.store = store
         self.voice = voice
         self.https_port = None  # Set by hub.py when it serves HTTPS, so the phone can offer the link.
+        self.local_name = None  # Likewise the name it announces, such as maavnetwork.local.
         self.voice_reason = voice.unavailable_reason() if voice else 'voice is not set up on this hub'
         self.save_area = save_area
         self.area = None
@@ -73,6 +75,7 @@ class HubCore:
         self.sitl = sitl
         self.sitl_gone = set()
         self.colors = {}
+        self.duplicate_warned = {}
         # Where each picked drone has been this mission, as (lat, lon). The version changes
         # whenever the trails start again or their grid does, so phones know to redraw.
         self.trails = {}
@@ -117,7 +120,15 @@ class HubCore:
             self.catalogs.pop(drone_id, None)
             self.log('hub', 'WARN', f'{drone_id} disconnected')
 
-    def agent_message(self, drone_id, message):
+    def agent_message(self, drone_id, message, link=None):
+        # Only the newest connection under a name counts. If an older one is still talking,
+        # two agents are using the same --drone-id, perhaps one left from an earlier run.
+        if link is not None and self.links.get(drone_id) is not link:
+            if self.now() - self.duplicate_warned.get(drone_id, -1e9) > DUPLICATE_WARN_S:
+                self.duplicate_warned[drone_id] = self.now()
+                self.log('hub', 'WARN', f'two agents are connected as {drone_id}. Only the newest is used: '
+                                        'stop the other, which may be left from an earlier run')
+            return
         record = self._drone(drone_id)
         record['last_seen'] = self.now()
         kind = message.get('type')
@@ -435,6 +446,7 @@ class HubCore:
             'sitl': {'available': self.sitl is not None, 'drones': self._sitl_view()},
             'area': self.area.view() if self.area else None,
             'https': {'port': self.https_port} if self.https_port else None,
+            'local_name': self.local_name,
             'voice': {'available': not (self.voice_reason or self._voice_flying()),
                       'reason': self.voice_reason or self._voice_flying()},
             'mission': self._mission_view(),
@@ -770,6 +782,8 @@ class HubCore:
             if all(self._finished(d) for d in drones):
                 self._stop_clock()
                 self._set_state(COMPLETE)
+                # Landed drones kept their launches running for the others until now.
+                self._send_all({'type': 'finish', 'run_id': self.run_id})
 
     def _refused(self, reason):
         return {'ok': False, 'state': self.state, 'reason': reason}

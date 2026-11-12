@@ -67,12 +67,49 @@ function useWakeLock(active: boolean) {
   }, [active]);
 }
 
+// The HTTPS addresses to try for a page opened over plain HTTP. Without a port (that is, through
+// port 80) the hub's 443 is tried first, since serve_on_80_and_443.sh sets both up together.
+export function httpsCandidates(location: { hostname: string; port: string }, httpsPort: number) {
+  const explicit = `https://${location.hostname}:${httpsPort}`;
+  return location.port === '' || location.port === '80' ? [`https://${location.hostname}`, explicit] : [explicit];
+}
+
+// On plain HTTP, move to HTTPS if this phone trusts the hub's certificate, for the microphone and
+// the wake lock. The check only succeeds once the hub's CA is installed, so a new phone stays put,
+// where the talk button shows how to install it.
+function useMoveToHttps(httpsPort: number | null) {
+  useEffect(() => {
+    if (window.isSecureContext || httpsPort === null) return;
+    let cancelled = false;
+    void (async () => {
+      for (const origin of httpsCandidates(location, httpsPort)) {
+        const controller = new AbortController();
+        const timer = window.setTimeout(() => controller.abort(), 3000);
+        try {
+          // An opaque reply is enough: it means the connection and its certificate were accepted.
+          await fetch(`${origin}/api/state`, { mode: 'no-cors', cache: 'no-store', signal: controller.signal });
+          if (!cancelled) location.replace(`${origin}${location.pathname}${location.search}${location.hash}`);
+          return;
+        } catch {
+          // Not trusted yet, or nothing listening there: try the next, then stay on HTTP.
+        } finally {
+          window.clearTimeout(timer);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [httpsPort]);
+}
+
 export function App() {
   const hub = useHub();
   const [tab, setTab] = useState<Tab>('Mission');
   const now = useTicker(250);
   const { snapshot, linked, receivedAt } = hub;
   useWakeLock(snapshot !== null && ACTIVE.includes(snapshot.state));
+  useMoveToHttps(snapshot?.https?.port ?? null);
 
   const sinceReceived = now - receivedAt;
   // The timer keeps counting through a dropout, and the hub corrects it on reconnect.

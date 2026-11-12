@@ -806,3 +806,29 @@ def test_each_drone_keeps_its_own_colour(sitl_core):
         sitl_core.agent_connected(f'sim{number}', FakeLink())
     # Past the palette, a drone is drawn in ink rather than reusing a colour.
     assert {d['id']: d['color'] for d in sitl_core.snapshot()['drones']}['sim8'] is None
+
+
+
+def test_every_drone_is_told_when_the_run_is_complete(core, links):
+    to_searching(core)
+    run_id = core.run_id
+    for _ in range(2):
+        for drone_id in ('d1', 'd2'):
+            status(core, drone_id, run_state='done', run_id=run_id, airborne=False, armed=False)
+    assert core.state == COMPLETE
+    for link in links.values():
+        assert link.sent[-1] == {'type': 'finish', 'run_id': run_id}
+
+
+
+def test_a_second_agent_under_the_same_name_is_ignored_and_reported(core, links):
+    """Seen in SITL: an agent left from an earlier run reconnected as sim1 beside the new one,
+    and the hub mixed their reports."""
+    newer = FakeLink()
+    core.agent_connected('d1', newer)
+    core.agent_message('d1', {'type': 'status', 'activity': 'Flying route'}, newer)
+    core.agent_message('d1', {'type': 'status', 'activity': 'On ground'}, links['d1'])
+    assert core.snapshot()['drones'][0]['activity'] == 'Flying route'
+    warnings = [line for line in core.logs if 'two agents are connected as d1' in line['text']]
+    core.agent_message('d1', {'type': 'status'}, links['d1'])
+    assert len(warnings) == 1 and len([l for l in core.logs if 'two agents' in l['text']]) == 1
