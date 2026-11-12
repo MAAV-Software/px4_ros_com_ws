@@ -36,6 +36,9 @@ class Avoidance:
         # PX4 local x=N, y=E; Gazebo/default shared world X=E, Y=N.
         return self.origin[0] + position.y, self.origin[1] + position.x
 
+    def payload(self, position):
+        return [float(self.instance), *self.global_xy(position)]
+
     def receive(self, data, now_s):
         """Wire payload is exactly [instance, global_x, global_y]."""
         if len(data) != 3 or not all(math.isfinite(v) for v in data):

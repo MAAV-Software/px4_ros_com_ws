@@ -159,7 +159,7 @@ The Map tab has two views, and each phone remembers which it last showed:
 
 Type the four corners as WGS84 degrees (latitude, longitude), ideally from an RTK fix, since a square is only 0.61 m. Corners more than one square away from 80 by 300 ft, out of square, or in the wrong order are flagged, but still used. The hub converts every drone's position with the same transform, so all drones agree. It works each position out from PX4's own `ref_lat`/`ref_lon` and local position, with PX4's projection. A drone off the field is drawn hollow on its edge, with its distance off. The area is kept across restarts, and can't change during a run.
 
-In SITL there are no measured corners, so "Place a test field around SITL 1" puts a true north-south field with that drone 2 m in from the south-west corner. A second SITL drone 20 m east is then still on the field.
+In SITL there are no measured corners, so "Place a test field around SITL 1" puts a true north-south field with that drone 2 m in from the south-west corner. A second SITL drone 20 m east is then still on the field. The "South edge of the field" layout (milestone 4's scan) instead puts the field where its routes expect it: the four drones wait in a row 3 m south of it, at 1, 9, 17 and 23 m east of its south-west corner.
 
 Each drone has its own colour, kept while the hub knows it, on its map marker, its trail and its Fleet card. From Start until New mission, the map draws where each picked drone has been as a line in its colour. The hub records a point whenever a drone moves 0.3 m, so every phone draws the same trail. A phone that reconnects gets the whole trail again, and after that only new points. A trail that leaves the field is cut off at its edge.
 

@@ -13,8 +13,12 @@ or via the provided launch file:
 
 Run one independent node per vehicle. Namespace and command target are selected
 by parameters; waypoint, hold, yaw and retry logic are inherited from milestone 1.
-Higher-instance vehicles have priority within a 5 m horizontal radius.
-The lower instance brakes, climbs 5 m, waits for clearance, then resumes.
+The avoidance parameter picks the anti-collision policy. 'orca' (default):
+every drone shares its position and velocity, and flies the horizontal velocity
+ORCA allows toward its waypoint, so drones sidestep each other without
+stopping. 'priority': higher-instance vehicles have priority within a 5 m
+horizontal radius; the lower instance brakes, climbs 5 m, waits for clearance,
+then resumes. Every drone in a fleet must use the same policy.
 """
 import math
 
@@ -22,7 +26,9 @@ import rclpy
 import yaml
 
 from milestone4_multivehicle.vehicle import declare_vehicle
-from milestone4_multivehicle.avoidance import Avoidance, POSITION_TOPIC, PEER_TIMEOUT_S
+from milestone4_multivehicle.avoidance import Avoidance, POSITION_TOPIC
+from milestone4_multivehicle.avoidance import PEER_TIMEOUT_S as OWN_POSITION_TIMEOUT_S
+from milestone4_multivehicle.orca_avoidance import OrcaAvoidance
 from std_msgs.msg import Float64MultiArray
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
@@ -57,10 +63,21 @@ class OffboardControl(Node):
         origin = origins[self.instance] if 0 <= self.instance < 4 else (0., 0.)
         self.declare_parameter('initial_global_x', origin[0])
         self.declare_parameter('initial_global_y', origin[1])
-        self.avoidance = Avoidance(
-            self.instance, self.get_parameter('initial_global_x').value,
-            self.get_parameter('initial_global_y').value,
-            self.get_parameter('vehicle_count').value)
+        self.declare_parameter('avoidance', 'orca')
+        self.declare_parameter('max_speed', 1.0)
+        self.policy = self.get_parameter('avoidance').value
+        origin_x = self.get_parameter('initial_global_x').value
+        origin_y = self.get_parameter('initial_global_y').value
+        count = self.get_parameter('vehicle_count').value
+        if self.policy == 'orca':
+            # max_speed should match the drone's MPC_XY_VEL_MAX, so ORCA's chosen
+            # velocities are ones PX4 will actually fly.
+            self.avoidance = OrcaAvoidance(self.instance, origin_x, origin_y, count,
+                                           float(self.get_parameter('max_speed').value))
+        elif self.policy == 'priority':
+            self.avoidance = Avoidance(self.instance, origin_x, origin_y, count)
+        else:
+            raise ValueError("avoidance must be 'orca' or 'priority'")
         self.declare_parameter("waypoints_file", "")
         waypoints_file = self.get_parameter("waypoints_file").value
 
@@ -170,12 +187,11 @@ class OffboardControl(Node):
     def position_fresh(self, now_s):
         return (self.valid_position(self.current_position)
                 and self.position_received_s is not None
-                and 0 <= now_s - self.position_received_s <= PEER_TIMEOUT_S)
+                and 0 <= now_s - self.position_received_s <= OWN_POSITION_TIMEOUT_S)
 
     def publish_global_position(self):
         msg = Float64MultiArray()
-        x, y = self.avoidance.global_xy(self.current_position)
-        msg.data = [float(self.instance), x, y]
+        msg.data = self.avoidance.payload(self.current_position)
         self.global_position_pub.publish(msg)
 
     def on_ack(self, msg):
@@ -200,7 +216,12 @@ class OffboardControl(Node):
         previous_state = self.avoidance.state
         if fresh:
             self.telemetry_hold = None
-            override = self.avoidance.update(self.current_position, now_s)
+            if self.policy == 'orca':
+                previous = self.waypoints[self.waypoint_index - 1] if self.waypoint_index > 0 else None
+                override = self.avoidance.update(
+                    self.current_position, now_s, self.current_target(), previous)
+            else:
+                override = self.avoidance.update(self.current_position, now_s)
         else:
             # An unobserved interval cannot count as continuously stopped.
             self.avoidance.stopped_since = None
@@ -209,7 +230,8 @@ class OffboardControl(Node):
             override = self.telemetry_hold
         if previous_state != self.avoidance.state:
             self.get_logger().info(f'Anti-collision: {previous_state} -> {self.avoidance.state}')
-        paused = not fresh or override is not None
+        # ORCA targets still lead to the waypoint, so its arrival and hold count.
+        paused = not fresh or (override is not None and not override.get('keep_progress'))
         if paused:
             self.hold_started_ns = None
 
@@ -289,8 +311,13 @@ class OffboardControl(Node):
         if elapsed_s < target['hold_s']:
             return
 
+        last = self.waypoint_index == len(self.waypoints) - 1
+        if last and self.avoidance.state == 'AVOIDING':
+            # PX4's landing doesn't avoid anyone: wait until ORCA has been quiet
+            # for a second. The hold is kept, so this lands on the next clear tick.
+            return
         self.hold_started_ns = None
-        if self.waypoint_index < len(self.waypoints) - 1:
+        if not last:
             self.waypoint_index += 1
             self.get_logger().info(
                 f'advancing to waypoint {self.waypoint_index}')
@@ -303,12 +330,18 @@ class OffboardControl(Node):
     def publish_offboard_control_mode(self):
         msg = OffboardControlMode()
         msg.position = True
+        # ORCA flies horizontal velocity setpoints, with position held in z only.
+        msg.velocity = self.policy == 'orca'
         msg.timestamp = int(self.get_clock().now().nanoseconds / 1000)
         self.offboard_control_mode_pub.publish(msg)
 
     def publish_trajectory_setpoint(self, target):
         msg = TrajectorySetpoint()
-        msg.position = list(target['pos'])
+        msg.position = [float(v) for v in target['pos']]
+        if 'vel' in target:
+            # NaN position x/y makes PX4 track this velocity in x/y, while z
+            # stays a position setpoint.
+            msg.velocity = [float(target['vel'][0]), float(target['vel'][1]), math.nan]
         # Ramp toward the YAML yaw (radians) rather than stepping straight to
         # it, so PX4 doesn't overshoot on a large heading change.
         msg.yaw = self.ramped_yaw(target['yaw'])

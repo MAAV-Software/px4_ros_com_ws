@@ -3,7 +3,7 @@
 <package format="3">
   <name>milestone4_multivehicle</name>
   <version>0.0.1</version>
-  <description>Milestone 4: four-vehicle PX4 waypoint control with priority-based anti-collision</description>
+  <description>Milestone 4: four-vehicle PX4 waypoint control with ORCA or priority anti-collision</description>
   <maintainer email="theamitsail@gmail.com">Amit Sail</maintainer>
   <license>BSD-3</license>
 
