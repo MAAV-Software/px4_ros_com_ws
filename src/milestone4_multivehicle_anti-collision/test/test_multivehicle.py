@@ -145,7 +145,9 @@ def api(monkeypatch):
 
 
 def make_controller(api, instance, **overrides):
-    FakeNode.overrides = {'vehicle_count': 2, 'vehicle_instance': instance, 'waypoints_file': PATH, **overrides}
+    # The priority policy unless a test asks for ORCA: most of these tests predate it.
+    FakeNode.overrides = {'vehicle_count': 2, 'vehicle_instance': instance, 'waypoints_file': PATH,
+                          'avoidance': 'priority', **overrides}
     return api('milestone4_multivehicle/offboard_control_solution.py').OffboardControl()
 
 
@@ -233,7 +235,8 @@ SQUARE = [(0.0, 0.0), (20.0, 0.0), (20.0, 20.0), (0.0, 20.0)]
 
 
 def collision_context(**overrides):
-    values = {'topic_prefix': '', 'system_id': '1', 'vehicle_count': '4'}
+    values = {'topic_prefix': '', 'system_id': '1', 'vehicle_count': '4',
+              'avoidance': 'orca', 'max_speed': '1.0'}
     for i in range(4):
         values.update({f'path_{i + 1}': HEADON[i], f'spawn_x_{i + 1}': str(SQUARE[i][0]),
                        f'spawn_y_{i + 1}': str(SQUARE[i][1])})
@@ -301,6 +304,7 @@ def test_collision_timeout_starts_no_mission(api):
     {'system_id': '5'}, {'system_id': '0'}, {'system_id': '3', 'vehicle_count': '2'},
     {'vehicle_count': '5'}, {'topic_prefix': '/bad name'},
     {'path_1': '/missing/path.yaml'}, {'spawn_x_1': 'nan'},
+    {'avoidance': 'none'}, {'max_speed': '0'}, {'max_speed': 'nan'},
 ])
 def test_bad_collision_vehicle_rejected_before_anything_starts(api, bad):
     with pytest.raises((ValueError, OSError)):
@@ -309,7 +313,8 @@ def test_bad_collision_vehicle_rejected_before_anything_starts(api, bad):
 
 def test_collision_launch_starts_no_simulator():
     """The same file has to run in SITL and on a real drone."""
-    text = (ROOT / 'launch' / 'collision_launch.py').read_text()
+    text = ''.join((ROOT / f).read_text() for f in (
+        'launch/collision_launch.py', 'launch/scan_launch.py', 'milestone4_multivehicle/fleet_launch.py'))
     for word in ('launch_sitl', 'px4_sitl.launch.py', 'MicroXRCEAgent', 'headless'):
         assert f"'{word}'" not in text
     for argument in ('topic_prefix', 'system_id', 'vehicle_count'):

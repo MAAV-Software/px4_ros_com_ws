@@ -21,7 +21,7 @@ setup(
     zip_safe=True,
     maintainer='Amit Sail',
     maintainer_email='theamitsail@gmail.com',
-    description='Milestone 4: four-vehicle PX4 waypoint control with priority-based anti-collision',
+    description='Milestone 4: four-vehicle PX4 waypoint control with ORCA or priority anti-collision',
     license='BSD-3',
     entry_points={
         'console_scripts': [
