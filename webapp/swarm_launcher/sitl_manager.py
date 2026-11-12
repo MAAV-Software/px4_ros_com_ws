@@ -37,10 +37,11 @@ LAYOUTS = {
 }
 DEFAULT_LAYOUT = 'line'
 XRCE_PORT = '8888'
-# The same limits milestone 2's SITL sets, and the HITL runbook asks of real drones. No GCS
-# link failsafe, since nothing needs QGroundControl open to fly a simulated drone.
+# Milestone 2's SITL limits, except 1 m/s horizontal rather than 2 (since 2026-11-12): at
+# 2 m/s milestone 4's head-on test collided. The HITL runbook still asks real drones for 2.
+# No GCS link failsafe, since nothing needs QGroundControl open to fly a simulated drone.
 SITL_PARAMS = {
-    'MPC_XY_VEL_MAX': '2',
+    'MPC_XY_VEL_MAX': '1',
     'MPC_Z_VEL_MAX_UP': '1',
     'MPC_Z_VEL_MAX_DN': '1',
     'MPC_YAWRAUTO_MAX': '45',

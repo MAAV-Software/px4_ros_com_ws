@@ -122,6 +122,7 @@ is introduced, preserving the three-field communications protocol.
 | Run | Routes/origins | Routing/readiness | Priority pairs | Multi-peer wait/release | Peer loss | Min separation | All completed | Bag / four logs | Result |
 |---|---|---|---|---|---|---|---|---|---|
 | 1 (2026-11-11, `3091fcc`) | Head-on YAMLs; web launcher SITL, 20 m square layout, MPC_XY_VEL_MAX 2 m/s | All four namespaces, system IDs and origins correct; all ready before arming | 0, 1, 2 braked on higher peers; 3 never yielded, as designed | 0 and 2 climbed to the same ~10 m layer; 0 re-latched and climbed again to 12.8 m | Not tested | **0.09 m** (1–3, both at 5 m); also 0–2 2.7 m (2.1 m vertical), 2–3 3.1 m, 0–3 3.9 m at the same height | Yes, but only after 1 hit the ground | `~/m4_runs/m4_headon_run01` on the SITL VM; no ULogs kept | **FAIL**: mid-air collision |
+| 2 (2026-11-12, `12bf939` + SITL cap change) | Same head-on YAMLs and square layout; MPC_XY_VEL_MAX **1 m/s** (measured max 1.05–1.06 m/s on all four) | All four correct; all armed and accepted offboard | 0, 1, 2 braked within 0.9 s of each other on higher peers and climbed; 3 never yielded | 0 and 1 both climbed to ~10 m and held 4.98 m apart at the same height; 0 re-latched at t+77.2 s and climbed again to 12.9 m | Not tested | **2.12 m** (1–3: 1.52 m horizontal, 1.47 m vertical, 1 climbing through 6.5 m); 0–2 3.78 m, 1–2 4.46 m, 0–3 4.21 m, 2–3 3.80 m, 0–1 4.98 m | Yes, all four landed; mission complete in 1:32 | `~/m4_runs/m4_headon_run02` on the SITL VM; no ULogs kept | **No contact, small margin** |
 
 Run 1 notes: drones 1 and 3 fly the same diagonal head-on. They closed at about
 4 m/s, so drone 1 started braking (t+68.3 s, 5.7 m apart) only about 1.3 s before
@@ -131,6 +132,13 @@ contact and never reached its climb. Drone 3 flew through its position at 2 m/s
 dropped to 4.1 m. The launcher reported the run as Complete. The 5 m trigger
 needs about 5 s at this closing speed (brake, 0.5 s stop, 5 m climb at 1 m/s),
 so at the web launcher's 2 m/s cap the policy cannot clear a head-on pair.
+
+Run 2 notes: the web launcher's SITL cap was lowered to 1 m/s. Drone 1 braked at
+t+67.3 s and started climbing at t+70.3 s, after the 0.5 s stop hold. Drone 3
+passed under it 1.5 s into the climb (t+71.8 s), 1.52 m apart horizontally and
+1.47 m vertically. Halving the speed avoided contact only because the climb had
+just begun; the policy still has no margin for a head-on pair. The same-layer climb
+(0 and 1 at 10 m) and drone 0's second climb from run 1 repeated.
 
 ## Scope of validation and known policy limits
 

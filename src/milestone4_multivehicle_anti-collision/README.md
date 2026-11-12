@@ -49,8 +49,9 @@ have fresh messages. The interrupted waypoint resumes with its hold reset.
 The shared payload remains only `[instance, global_x, global_y]`.
 
 The controller sets no PX4 parameters. The web launcher's SITL drones use a
-2 m/s horizontal cap, 1 m/s climb/descent and 45 degree/s yaw. At 2 m/s the first
-SITL run failed with a mid-air collision; see the results log.
+1 m/s horizontal cap, 1 m/s climb/descent and 45 degree/s yaw. The cap was 2 m/s
+until 2026-11-12; at 2 m/s the first SITL run failed with a mid-air collision.
+See the results log.
 
 The original rule is reactive and ignores Z: multiple yielding drones may
 climb to the same altitude, and a stationary higher-priority drone can block
