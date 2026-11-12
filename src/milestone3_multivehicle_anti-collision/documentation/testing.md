@@ -1,7 +1,6 @@
-# Testing and scoring the Milestone 3 package
+# Testing the Milestone 3 package
 
-Keep the existing per-vehicle baseline scoring, and assess anti-collision from
-paired recordings. The [test guide](milestone-3-anti-collision.md) defines M1–M7
+Assess anti-collision from paired recordings. The [test guide](milestone-3-anti-collision.md) defines M1–M7
 and the new A1–A8 acceptance criteria. No SITL or hardware pass is claimed by
 these code changes.
 
@@ -19,62 +18,20 @@ colcon test-result --verbose
 Without ROS, run from the extracted package folder:
 
 ```bash
-python3 -m pip install pytest numpy PyYAML
+python3 -m pip install pytest PyYAML
 PYTHONPATH=. python3 -m pytest test -q
 ```
 
-`test_scoring.py` retains the baseline metrics/threshold checks.
-`test_multivehicle.py` checks vehicle routing, readiness and launch sequencing
-with in-memory ROS interfaces. `test_avoidance.py` checks fixed-origin frame
-conversion, the exact 5 m boundary, priority, braking, one-time climb, waiting,
-resuming, malformed messages, stale data, hold/waypoint preservation and
-consistent launch origins. These tests do not exercise real DDS or flight dynamics.
-
-## Baseline flight and scoring
-
-Start QGroundControl, stop earlier simulations, then run:
-
-```bash
-ros2 launch milestone3_multivehicle offboard_solution.launch.py headless:=false
-```
-
-The original full/square/updown waypoint values, scoring thresholds, 2 m/s XY,
-1 m/s vertical and 45 degree/s yaw settings are unchanged. The default 20 m
-spawn spacing separates these baseline paths, so avoidance normally stays idle.
-Install `pyulog` for analysis. Score each actual `.ulg` with the matching path:
-
-```bash
-ros2 run milestone3_multivehicle m3_analyze /actual/path/vehicle0.ulg \
-  --vehicle 0 --stage sitl --out /tmp/m3_baseline
-ros2 run milestone3_multivehicle m3_analyze /actual/path/vehicle1.ulg \
-  --vehicle 1 --stage sitl --out /tmp/m3_baseline
-```
-
-Replace the example log paths. Omit `--path` only for `milestone3_path.yaml`;
-otherwise supply the exact scored YAML. `--stage hitl` retains the inherited
-real-airframe threshold name. `--vehicle` labels reports, it does not verify
-log identity. Verify MAV_SYS_ID/instance mapping yourself. Reports use distinct
-`vehicle_0_...` / `vehicle_1_...` prefixes. Exit codes remain 0 for baseline PASS,
-1 for FAIL/INCOMPLETE, 2 for a log/config/dependency error.
-
-**Scoring scope:** `m3_analyze` is still a single-vehicle baseline scorer.
-It cannot infer priority, shared-frame distance or a peer's exit from one ULog.
-Avoidance adds setpoints absent from the original path and can split waypoint
-segments, so a correct avoidance flight can yield unmatched-setpoint or metric
-failures. Do not weaken thresholds or suppress those segments to force PASS.
-Use the baseline paths for baseline reports and the common bag for A1–A8.
-The collision-demo files intentionally contain only controller waypoints, with
-no baseline thresholds/test IDs; do not pass them to `m3_analyze`.
+`test_multivehicle.py` checks vehicle routing, readiness and
+`collision_launch.py` with in-memory ROS interfaces. `test_avoidance.py` checks
+fixed-origin frame conversion, the exact 5 m boundary, priority, braking, one-time
+climb, waiting, resuming, malformed messages, stale data and hold/waypoint
+preservation. These tests do not exercise real DDS or flight dynamics.
 
 ## Anti-collision SITL run
 
-For a recording that includes startup, launch the simulator first:
-
-```bash
-ros2 launch milestone3_multivehicle px4_sitl.launch.py headless:=false
-```
-
-In a second sourced terminal, record the shared positions, controller events,
+Start two SITL drones from the web launcher's Fleet tab, in the **Line** spawn
+layout. In a sourced terminal, record the shared positions, controller events,
 and both actual positions/setpoints:
 
 ```bash
@@ -86,9 +43,9 @@ ros2 bag record -o m3_avoidance_run01 \
   /px4_1/fmu/in/vehicle_command /px4_1/fmu/out/vehicle_command_ack_v1
 ```
 
-In two more sourced terminals, one vehicle each (or use the web launcher's SITL
-mode, which starts both together and keeps each controller running until both
-have landed):
+Then start the mission from the web launcher's Mission tab, which starts both
+controllers together and keeps each running until both have landed. Or, in two
+more sourced terminals, one vehicle each:
 
 ```bash
 ros2 launch milestone3_multivehicle collision_launch.py system_id:=1
@@ -120,8 +77,8 @@ same point; it does not establish safety for every possible route.
 
 ## Peer/controller loss and readiness
 
-Use an external simulation for controller-loss tests so stopping a controller
-does not also stop PX4/Gazebo. Start controllers in separate terminals:
+Start the SITL drones from the web launcher, so stopping a controller does not
+also stop PX4/Gazebo. Start controllers in separate terminals:
 
 ```bash
 share=$(ros2 pkg prefix --share milestone3_multivehicle)
@@ -147,8 +104,8 @@ Offboard-loss failsafe; inspect the ULog separately. Restarting an airborne
 controller loses its encounter/waypoint state and is not an automatic recovery
 procedure. Finish/reset the test before relaunching.
 
-The pair launcher still blocks both controllers when either PX4 readiness
-check fails. Independently, instance 0 will not arm without fresh shared XY
+Each `collision_launch.py` starts its controller once its own PX4 is ready;
+there is no pair-wide readiness gate. Independently, instance 0 will not arm without fresh shared XY
 from instance 1. There is intentionally no bypass in this package for testing
 instance 0 alone with the higher-priority peer absent.
 
@@ -156,7 +113,7 @@ instance 0 alone with the higher-priority peer absent.
 
 Only after SITL checks, run the same A1–A8 sequence on the real airframes with
 measured common East/North origins, matching PX4/ROS message schemas and
-independent takeover. `launch_sitl:=false` does not set flight-controller speed
+independent takeover. The controller does not set flight-controller speed
 parameters. Allow the extra 5 m overhead clearance, and validate the fixed
 origin model against actual position estimates. Both stages need recorded
-paired evidence; successful unit tests or baseline ULogs alone are insufficient.
+paired evidence; successful unit tests alone are insufficient.

@@ -9,7 +9,7 @@ Usage:
   ros2 run milestone4_multivehicle offboard_solution --ros-args \
     -p waypoints_file:=/absolute/path/to/waypoints.yaml
 or via the provided launch file:
-  ros2 launch milestone4_multivehicle offboard_solution.launch.py
+  ros2 launch milestone4_multivehicle collision_launch.py system_id:=1
 
 Run one independent node per vehicle. Namespace and command target are selected
 by parameters; waypoint, hold, yaw and retry logic are inherited from milestone 1.

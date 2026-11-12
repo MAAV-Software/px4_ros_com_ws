@@ -27,6 +27,13 @@ radius, one-time 5 m climb, braking criterion (<=0.2 m/s for 0.5 s), 10 Hz loop,
 command routing semantics, arm retry logic, yaw ramp or landing procedure.
 The existing two-drone offset-pass resources are retained for regression tests.
 
+**Since 2026-11-11** the package has only `collision_launch.py`, flying one
+vehicle per launch. `offboard_solution.launch.py`, `px4_sitl.launch.py`,
+`square_launch.py`, `updown_launch.py`, `m4_sitl_process`, the `m4_analyze`
+scorer and the baseline path/square/updown YAMLs were removed. SITL drones are
+started from the web launcher's Fleet tab (20 m square layout). The list above
+describes the change as first made.
+
 ## Mapping and arguments
 
 | Instance | Path argument | World origin East, North (m) | DDS namespace | MAV_SYS_ID |
@@ -64,20 +71,16 @@ A landed higher-priority peer therefore still occupies its XY radius.
 
 ## Running and recording
 
-Build/run commands are in README. Stop the previous simulator before changing
-spawns. To record from before mission startup:
-
-```bash
-ros2 launch milestone4_multivehicle px4_sitl.launch.py headless:=false
-```
-
-In another sourced terminal (records all four PX4 streams and the shared topic):
+Build/run commands are in README. Start four SITL drones from the web launcher's
+Fleet tab in the **20 m square** layout. To record from before mission startup,
+in a sourced terminal (records all four PX4 streams and the shared topic):
 
 ```bash
 ros2 bag record -o m4_run01 -e '^(/milestone4/global_positions|/rosout|/fmu/.*|/px4_[123]/fmu/.*)$'
 ```
 
-Then launch the controllers, one vehicle per sourced terminal:
+Then start the mission from the web launcher's Mission tab, or launch the
+controllers by hand, one vehicle per sourced terminal:
 
 ```bash
 ros2 launch milestone4_multivehicle collision_launch.py system_id:=1
@@ -89,8 +92,8 @@ ros2 launch milestone4_multivehicle collision_launch.py topic_prefix:=/px4_3 sys
 Each starts its controller once its own PX4 is ready, so there is no fleet-wide
 readiness gate: start them close together.
 
-With custom origins/count, pass identical values to simulator and controllers.
-Controller-only launches do not apply the speed parameters to existing PX4s.
+With custom origins/count, pass identical values to every controller, matching
+where the drones really started. The controller sets no PX4 speed parameters.
 Head-on routes have two waypoints: climb/hold 10 s at 5 m, then fly the diagonal
 and hold 5 s before land. Arrival times differ; no shared departure barrier
 is introduced, preserving the three-field communications protocol.
@@ -99,10 +102,10 @@ is introduced, preserving the three-field communications protocol.
 
 1. Verify all four DDS namespaces, MAV_SYS_IDs and global origins against Gazebo.
    Confirm only three values per shared message and correct motion on both axes.
-2. Verify four separated baseline flights, independent path overrides, all
-   actual land/disarm events and a distinct ULog under rootfs/0..3/fs/log.
-3. Remove any readiness input: no mission should start. Duplicate any namespace
-   or system ID or supply an invalid fourth path: launch must reject the fleet.
+2. Verify independent path overrides, all actual land/disarm events and a
+   distinct ULog under rootfs/0..3/fs/log.
+3. Remove a drone's readiness input: its mission must not start. Supply an
+   invalid path or system ID: that drone's launch must refuse before arming.
 4. Exercise each priority pair. Only the lower instance should yield at <=5 m.
    Record actual velocities, fixed XY braking target, and one captured z-5 target.
 5. Place two higher peers inside a lower drone's radius. Moving one out must
@@ -132,11 +135,8 @@ so at the web launcher's 2 m/s cap the policy cannot clear a head-on pair.
 ## Scope of validation and known policy limits
 
 Unit tests check decisions and launch wiring, not DDS transport or flight
-physics. `m4_analyze` remains the single-vehicle baseline scorer with
-`--vehicle 0`, `1`, `2` or `3`; its report is not an anti-collision certificate.
-Baseline YAMLs retain thresholds; head-on YAMLs are controller-only and should
-be evaluated from paired/fleet recordings, not passed to the baseline scorer.
-Avoidance targets may be unmatched in baseline scoring; do not suppress them.
+physics. Head-on YAMLs are controller-only and are evaluated from fleet
+recordings; the package no longer has a per-vehicle flight scorer.
 
 The requested XY-only rule does not guarantee collision-free four-way convergence.
 Braking and climbing take time. Multiple lower drones at the same initial height

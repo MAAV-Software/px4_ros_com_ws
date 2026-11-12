@@ -26,8 +26,6 @@ setup(
     entry_points={
         'console_scripts': [
             'offboard_solution = milestone3_multivehicle.offboard_control_solution:main',
-            'm3_analyze = milestone3_multivehicle.analyze_flight:main',
-            'm3_sitl_process = milestone3_multivehicle.sitl_process:main',
             'm3_wait_ready = milestone3_multivehicle.wait_for_px4:main',
         ],
     },

@@ -13,7 +13,7 @@ topic_prefix and system_id, and sends Go once all have passed their start checks
 
 It starts no simulator, so it runs unchanged in SITL and on real drones. The
 controllers trade positions on /milestone4/global_positions, so their ROS graphs have
-to see each other. The default origins are the 20 m square px4_sitl.launch.py spawns:
+to see each other. The default origins are the web launcher's 20 m square SITL layout:
 (0,0), (20,0), (20,20), (0,20), world east/north. The origins must be where each
 drone really started, or the routes will not converge.
 

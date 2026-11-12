@@ -16,7 +16,7 @@ topic_prefix and system_id, and sends Go once both have passed their start check
 It starts no simulator, so it runs unchanged in SITL and on real drones. The two
 controllers trade positions on /milestone3/global_positions, so their ROS graphs have to
 see each other. In SITL they share one machine. The spawn origins match the web
-launcher's SITL drones (and px4_sitl.launch.py): the second 20 m east of the first.
+launcher's SITL drones in its line layout: the second 20 m east of the first.
 
   ros2 launch milestone3_multivehicle collision_launch.py system_id:=1
   ros2 launch milestone3_multivehicle collision_launch.py topic_prefix:=/px4_1 system_id:=2

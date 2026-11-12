@@ -5,6 +5,15 @@ and the pass criteria) and the [session plan](#session-plan). Scoring and test
 commands are in [`testing.md`](testing.md). Changes from milestone 2 are in
 [`milestone2-to-milestone3-review.md`](milestone2-to-milestone3-review.md).
 
+> **Since 2026-11-11** this package has only `collision_launch.py`, flying one
+> vehicle per launch. `offboard_solution.launch.py`, `px4_sitl.launch.py`,
+> `square_launch.py`, `updown_launch.py`, `m3_sitl_process`, the `m3_analyze`
+> scorer and the baseline path/square/updown YAMLs were removed, and SITL drones
+> are started from the web launcher's Fleet tab. The baseline-path, scoring and
+> by-hand SITL sections below (paths and separation, the freedom-of-flight
+> matrix, pass thresholds, Stage 1 build and run) describe that removed setup and
+> are kept as a record. The anti-collision test and A1–A8 still apply.
+
 # ChatGPT Convo Link
 The link below shows how this folder was created and includes the troubleshooting as well as simply useful information on how to run multivehicle control, testing, and proposed changes
 
@@ -211,11 +220,11 @@ Run the included **offset pass** with the default origins. `collision_launch.py`
 flies one vehicle and starts no simulator, so run it once per vehicle: `system_id`
 1 is instance 0 and 2 is instance 1. Each picks its own route and origin from the
 same arguments. The easiest way is the web launcher in SITL mode: add two SITL
-drones on its Fleet tab, pick this file in this folder, tick both and press Start.
-By hand, start the simulator, then each vehicle in its own sourced terminal:
+drones on its Fleet tab (Line layout), pick this file in this folder, tick both
+and press Start. By hand, with the SITL drones running, each vehicle in its own
+sourced terminal:
 
 ```bash
-ros2 launch milestone3_multivehicle px4_sitl.launch.py headless:=false
 ros2 launch milestone3_multivehicle collision_launch.py system_id:=1
 ros2 launch milestone3_multivehicle collision_launch.py topic_prefix:=/px4_1 system_id:=2
 ```
@@ -226,20 +235,10 @@ radius while keeping a 3 m lateral offset for initial validation. Instance 0
 should stop, climb to about 10 m, wait, and resume its original 5 m hover;
 instance 1 should continue west normally. The interrupted hold restarts, so
 instance 0 finishes later. These demo YAMLs have control waypoints only; they
-are evaluated using paired bag evidence, not the baseline metric scorer.
+are evaluated using paired bag evidence.
 Keep the original 20 m origin spacing for this demonstration. Custom origins
-require reviewing the routes too. Other wrappers still default to the original
-full, square and up/down paths.
-
-Change spawn spacing consistently for a baseline run with:
-
-```bash
-ros2 launch milestone3_multivehicle offboard_solution.launch.py \
-  headless:=false spawn_x_2:=12.0 spawn_y_2:=0.0
-```
-
-For a separately launched simulator, pass identical origin arguments when
-launching the controllers with `launch_sitl:=false`.
+require reviewing the routes too; pass the drones' actual origins as
+`spawn_x_N`/`spawn_y_N` to both launches.
 
 | ID | Required evidence in SITL, then on real airframes |
 |---|---|

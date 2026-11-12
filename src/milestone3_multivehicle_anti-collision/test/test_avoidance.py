@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from milestone3_multivehicle.avoidance import Avoidance
-from test_multivehicle import api, make_controller, position, launch_context, gate_actions
+from test_multivehicle import api, make_controller, position  # noqa: F401 (api is a fixture)
 
 
 def test_shared_frame_uses_fixed_origin_and_swaps_north_east():
@@ -149,25 +149,6 @@ def test_high_priority_does_not_yield_to_lower(api):
     node.on_timer()
     assert node.avoidance.state == 'NORMAL'
     assert node.trajectory_setpoint_pub.messages[-1].position == [0., 0., -5.]
-
-
-def test_launch_origins_are_identical_for_simulator_and_controllers(api):
-    ctx = launch_context(launch_sitl='true', spawn_x_1='-2', spawn_y_1='3',
-                         spawn_x_2='7', spawn_y_2='8')
-    actions, handlers = gate_actions(api, ctx)
-    include = next(a for a in actions if type(a).__name__ == 'IncludeLaunchDescription')
-    args = dict(include.launch_arguments)
-    handlers[0].on_exit(SimpleNamespace(returncode=0), ctx)
-    nodes = [a for a in handlers[1].on_exit(SimpleNamespace(returncode=0), ctx)
-             if type(a).__name__ == 'Node']
-    for i, node in enumerate(nodes, 1):
-        for axis in ('x', 'y'):
-            assert node.parameters[0][f'initial_global_{axis}'] == float(args[f'spawn_{axis}_{i}'])
-
-
-def test_nonfinite_origin_rejected_before_startup(api):
-    with pytest.raises(ValueError, match='finite'):
-        gate_actions(api, launch_context(spawn_x_2='nan'))
 
 
 def test_two_demo_controllers_exchange_positions_yield_resume_and_finish(api):
