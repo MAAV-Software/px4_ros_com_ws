@@ -1,0 +1,9 @@
+# SITL stress test; local North/East/Down, radians. Not baseline scoring input.
+#
+# Waypoint file for drone 1 in the head-on 4 drone collision test
+# Each drone spawns in their default positions (which depends on their instance number), in order of 0 to 4:
+# 0,0 20,0 20,20 0,20 (each spawn in their own corner)
+# then this waypoint file moves the drone to the opposite corner
+waypoints:
+  - {pos: [0, 0, -5], yaw: -0.7854, hold_s: 10.0}
+  - {pos: [20, -20, -5], yaw: -0.7854, hold_s: 5.0}

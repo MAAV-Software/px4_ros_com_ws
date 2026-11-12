@@ -608,8 +608,10 @@ def test_drones_of_the_other_kind_cannot_be_picked(core, links):
 
 def test_sitl_drones_are_added_one_at_a_time(sitl_core, clock):
     assert sitl_core.sitl_add()['ok']
-    assert sitl_core.snapshot()['sitl'] == {'available': True, 'drones': [
-        {'drone_id': 'sim1', 'instance': 0, 'state': 'starting', 'detail': 'starting PX4'}]}
+    sitl = sitl_core.snapshot()['sitl']
+    assert sitl['available'] and sitl['layout'] == 'line'
+    assert sitl['drones'] == [
+        {'drone_id': 'sim1', 'instance': 0, 'spawn': [0, 0], 'state': 'starting', 'detail': 'starting PX4'}]
     assert sitl_core.sitl_add()['reason'] == 'wait for sim1 to finish starting'
     sitl_core.agent_connected('sim1', FakeLink())
     assert sitl_core._sitl_view()[0]['detail'] == 'waiting for a position'
@@ -618,6 +620,22 @@ def test_sitl_drones_are_added_one_at_a_time(sitl_core, clock):
     assert sitl_core.sitl_add()['ok']
     clock.advance(hub_core.SITL_START_TIMEOUT_S + 1)
     assert sitl_core._sitl_view()[1]['state'] == 'stuck'
+
+
+def test_the_sitl_layout_is_picked_before_the_first_drone(sitl_core):
+    assert [layout['id'] for layout in sitl_core.snapshot()['sitl']['layouts']] == ['line', 'square']
+    assert sitl_core.sitl_layout('circle')['reason'] == "no SITL layout 'circle'"
+    assert sitl_core.sitl_layout('square')['ok']
+    assert sitl_core.snapshot()['sitl']['layout'] == 'square'
+    assert sitl_core.sitl_add()['ok']
+    assert sitl_core.sitl_layout('line')['reason'] == 'stop every SITL drone before changing the layout'
+    assert sitl_core.sitl_layout('square')['ok']  # picking the current one again is harmless
+
+
+def test_the_sitl_layout_only_changes_in_sitl(core):
+    core.sitl = SitlManager(FakeBackend())
+    assert core.sitl_layout('square')['reason'] == 'switch to SITL to change the SITL layout'
+    assert HubCore().snapshot()['sitl'] == {'available': False, 'drones': [], 'layout': None, 'layouts': []}
 
 
 def test_sitl_drones_can_only_be_added_in_sitl(core):

@@ -34,8 +34,17 @@ export type Mode = 'sitl' | 'hitl';
 export interface SitlDrone {
   drone_id: string;
   instance: number;
+  // Where it spawned in the Gazebo world: [east, north] in metres.
+  spawn: [number, number];
   state: 'starting' | 'ready' | 'stuck' | 'stopping' | 'exited';
   detail: string;
+}
+
+// Where SITL drones spawn, from SitlManager.layouts() in sitl_manager.py.
+export interface SitlLayout {
+  id: string;
+  label: string;
+  max: number;
 }
 
 export type Corner = 'south_west' | 'south_east' | 'north_east' | 'north_west';
@@ -109,7 +118,7 @@ export interface Snapshot {
   state: MissionState;
   reason: string;
   mode: Mode;
-  sitl: { available: boolean; drones: SitlDrone[] };
+  sitl: { available: boolean; drones: SitlDrone[]; layout: string | null; layouts: SitlLayout[] };
   area: Area | null;
   voice: { available: boolean; reason: string };
   https: { port: number } | null;

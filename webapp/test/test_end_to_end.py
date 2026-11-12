@@ -282,7 +282,7 @@ def test_sitl_drones_from_the_fleet_tab_fly_and_go(tmp_path):
     port = free_port()
     url = f'ws://127.0.0.1:{port}/agent'
 
-    def start_agent(instance, drone_id):
+    def start_agent(instance, drone_id, spawn):
         flight = FakeFlight(speed=SPEED)
         return TaskHandle(asyncio.ensure_future(
             run_agent(drone_id, flight, fake_library(), url, tmp_path / 'runs', sim=True)))
@@ -296,7 +296,10 @@ def test_sitl_drones_from_the_fleet_tab_fly_and_go(tmp_path):
         stack.wait_for(lambda s: s['mode'] == 'hitl', 'the hub')
         assert stack.post('/api/sitl/add').json()['reason'] == 'switch to SITL to add SITL drones'
         assert stack.post('/api/mode', mode='sitl').status_code == 200 and saved == ['sitl']
+        assert stack.post('/api/sitl/layout', layout='square').status_code == 200
         assert stack.post('/api/sitl/add').status_code == 200
+        assert stack.post('/api/sitl/layout', layout='line').json()['reason'] == \
+            'stop every SITL drone before changing the layout'
         state = stack.wait_for(lambda s: s['sitl']['drones'] and s['sitl']['drones'][0]['state'] == 'ready',
                                'SITL drone')
         assert [(d['id'], d['sim']) for d in state['drones']] == [('sim1', True)]
