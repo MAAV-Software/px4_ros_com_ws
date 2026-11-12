@@ -209,10 +209,17 @@ clearance. A 5 m trigger does not guarantee clearance for arbitrary closing
 speeds; the 5 m climb at the existing 1 m/s limit takes about 5 seconds after
 braking. No prediction, obstacle detection or trajectory replanning is added.
 
-Run the included **offset pass** with the default origins:
+Run the included **offset pass** with the default origins. `collision_launch.py`
+flies one vehicle and starts no simulator, so run it once per vehicle: `system_id`
+1 is instance 0 and 2 is instance 1. Each picks its own route and origin from the
+same arguments. The easiest way is the web launcher in SITL mode: add two SITL
+drones on its Fleet tab, pick this file in this folder, tick both and press Start.
+By hand, start the simulator, then each vehicle in its own sourced terminal:
 
 ```bash
-ros2 launch milestone3_multivehicle collision_launch.py headless:=false
+ros2 launch milestone3_multivehicle px4_sitl.launch.py headless:=false
+ros2 launch milestone3_multivehicle collision_launch.py system_id:=1
+ros2 launch milestone3_multivehicle collision_launch.py topic_prefix:=/px4_1 system_id:=2
 ```
 
 Instance 0 hovers at world XY `(0, 0)`; instance 1 flies west from `(20, 3)`

@@ -12,14 +12,22 @@ colcon test --packages-select milestone4_multivehicle
 colcon test-result --verbose
 ```
 
-Start QGroundControl and stop previous PX4/Gazebo runs first. Launch the four
-head-on routes supplied with this package:
+Start QGroundControl and stop previous PX4/Gazebo runs first. The four head-on
+routes supplied with this package are flown by `collision_launch.py`, which flies
+one vehicle and starts no simulator, so run it once per vehicle: `system_id` N is
+instance N-1. Each picks its own route and origin from the same arguments. Start
+the simulator, then each vehicle in its own sourced terminal:
 
 ```bash
-ros2 launch milestone4_multivehicle collision_launch.py headless:=false
+ros2 launch milestone4_multivehicle px4_sitl.launch.py headless:=false
+ros2 launch milestone4_multivehicle collision_launch.py system_id:=1
+ros2 launch milestone4_multivehicle collision_launch.py topic_prefix:=/px4_1 system_id:=2
+ros2 launch milestone4_multivehicle collision_launch.py topic_prefix:=/px4_2 system_id:=3
+ros2 launch milestone4_multivehicle collision_launch.py topic_prefix:=/px4_3 system_id:=4
 ```
 
-This automatically starts all four missions. Defaults put instances 0–3 at
+The web launcher's SITL mode spawns its drones in a line 20 m apart, not in this
+square, so the head-on routes don't converge there yet. Defaults put instances 0–3 at
 world XY `(0,0)`, `(20,0)`, `(20,20)`, `(0,20)`. The diagonal routes converge
 at `(10,10)` at 5 m altitude, then continue to the opposite corners. Equal
 holds do not synchronize departure; this is a convergence stress test, not

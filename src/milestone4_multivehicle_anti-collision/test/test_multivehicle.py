@@ -345,3 +345,93 @@ def test_controller_paths_do_not_require_scoring_metadata(api, tmp_path):
     path.write_text('waypoints:\n  - {pos: [0, 0, -3], yaw: 0, hold_s: 5}\n')
     _, handlers = gate_actions(api, launch_context(path_1=str(path), path_2=str(path)))
     assert len(handlers) == 2
+
+
+# --- collision_launch.py: one vehicle per launch ------------------------------------
+
+HEADON = [str(ROOT / f'resource/milestone4_headon_{i}.yaml') for i in range(4)]
+SQUARE = [(0.0, 0.0), (20.0, 0.0), (20.0, 20.0), (0.0, 20.0)]
+
+
+def collision_context(**overrides):
+    values = {'topic_prefix': '', 'system_id': '1', 'vehicle_count': '4'}
+    for i in range(4):
+        values.update({f'path_{i + 1}': HEADON[i], f'spawn_x_{i + 1}': str(SQUARE[i][0]),
+                       f'spawn_y_{i + 1}': str(SQUARE[i][1])})
+    return SimpleNamespace(is_shutdown=False, values={**values, **overrides})
+
+
+def collision_actions(api, context):
+    actions = api('launch/collision_launch.py').launch_vehicle(context)
+    handlers = [a.args[0] for a in actions if type(a).__name__ == 'RegisterEventHandler']
+    return actions, handlers
+
+
+def started_controller(api, context):
+    _, handlers = collision_actions(api, context)
+    started = handlers[0].on_exit(SimpleNamespace(returncode=0), context)
+    return next(a for a in started if type(a).__name__ == 'Node')
+
+
+@pytest.mark.parametrize('instance', range(4))
+def test_each_vehicle_takes_its_own_route_and_origin(api, instance):
+    prefix = '' if instance == 0 else f'/px4_{instance}'
+    context = collision_context(topic_prefix=prefix, system_id=str(instance + 1))
+    actions, _ = collision_actions(api, context)
+    assert [a.executable for a in actions if type(a).__name__ == 'Node'] == ['m4_wait_ready']
+    controller = started_controller(api, context)
+    params = controller.parameters[0]
+    assert controller.name == f'offboard_control_{instance}'
+    assert params['vehicle_instance'] == instance and params['target_system_id'] == instance + 1
+    assert params['vehicle_count'] == 4
+    assert params['topic_namespace'] == (prefix or '/')
+    assert params['waypoints_file'] == HEADON[instance]
+    assert (params['initial_global_x'], params['initial_global_y']) == SQUARE[instance]
+
+
+def test_all_drones_can_be_given_the_same_arguments(api):
+    """The web launcher sends every ticked drone the same values; each picks out its own."""
+    shared = {'spawn_x_3': '25.0', 'path_1': HEADON[2]}
+    params = [started_controller(api, collision_context(
+        topic_prefix='' if i == 0 else f'/px4_{i}', system_id=str(i + 1), **shared)).parameters[0]
+        for i in range(4)]
+    assert params[0]['waypoints_file'] == HEADON[2] and params[0]['initial_global_x'] == 0.0
+    assert params[2]['initial_global_x'] == 25.0
+    assert params[3]['waypoints_file'] == HEADON[3]
+
+
+def test_two_vehicle_offset_pass_still_runs(api):
+    collision = [str(ROOT / f'resource/milestone4_collision_{i}.yaml') for i in range(2)]
+    params = started_controller(api, collision_context(
+        topic_prefix='/px4_1', system_id='2', vehicle_count='2',
+        path_1=collision[0], path_2=collision[1], spawn_y_2='0.0')).parameters[0]
+    assert params['vehicle_count'] == 2 and params['waypoints_file'] == collision[1]
+
+
+def test_collision_timeout_starts_no_mission(api):
+    context = collision_context()
+    _, handlers = collision_actions(api, context)
+    result = handlers[0].on_exit(SimpleNamespace(returncode=1), context)
+    assert any(type(a).__name__ == 'EmitEvent' for a in result)
+    assert not any(type(a).__name__ == 'Node' for a in result)
+    context.is_shutdown = True
+    assert handlers[0].on_exit(SimpleNamespace(returncode=0), context) == []
+
+
+@pytest.mark.parametrize('bad', [
+    {'system_id': '5'}, {'system_id': '0'}, {'system_id': '3', 'vehicle_count': '2'},
+    {'vehicle_count': '5'}, {'topic_prefix': '/bad name'},
+    {'path_1': '/missing/path.yaml'}, {'spawn_x_1': 'nan'},
+])
+def test_bad_collision_vehicle_rejected_before_anything_starts(api, bad):
+    with pytest.raises((ValueError, OSError)):
+        collision_actions(api, collision_context(**bad))
+
+
+def test_collision_launch_starts_no_simulator():
+    """The same file has to run in SITL and on a real drone."""
+    text = (ROOT / 'launch' / 'collision_launch.py').read_text()
+    for word in ('launch_sitl', 'px4_sitl.launch.py', 'MicroXRCEAgent', 'headless'):
+        assert f"'{word}'" not in text
+    for argument in ('topic_prefix', 'system_id', 'vehicle_count'):
+        assert f"'{argument}'" in text

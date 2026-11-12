@@ -77,11 +77,17 @@ In another sourced terminal (records all four PX4 streams and the shared topic):
 ros2 bag record -o m4_run01 -e '^(/milestone4/global_positions|/rosout|/fmu/.*|/px4_[123]/fmu/.*)$'
 ```
 
-Then launch controllers:
+Then launch the controllers, one vehicle per sourced terminal:
 
 ```bash
-ros2 launch milestone4_multivehicle collision_launch.py launch_sitl:=false
+ros2 launch milestone4_multivehicle collision_launch.py system_id:=1
+ros2 launch milestone4_multivehicle collision_launch.py topic_prefix:=/px4_1 system_id:=2
+ros2 launch milestone4_multivehicle collision_launch.py topic_prefix:=/px4_2 system_id:=3
+ros2 launch milestone4_multivehicle collision_launch.py topic_prefix:=/px4_3 system_id:=4
 ```
+
+Each starts its controller once its own PX4 is ready, so there is no fleet-wide
+readiness gate: start them close together.
 
 With custom origins/count, pass identical values to simulator and controllers.
 Controller-only launches do not apply the speed parameters to existing PX4s.
