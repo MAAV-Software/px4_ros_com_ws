@@ -118,7 +118,16 @@ is introduced, preserving the three-field communications protocol.
 
 | Run | Routes/origins | Routing/readiness | Priority pairs | Multi-peer wait/release | Peer loss | Min separation | All completed | Bag / four logs | Result |
 |---|---|---|---|---|---|---|---|---|---|
-| | | | | | | | | | |
+| 1 (2026-11-11, `3091fcc`) | Head-on YAMLs; web launcher SITL, 20 m square layout, MPC_XY_VEL_MAX 2 m/s | All four namespaces, system IDs and origins correct; all ready before arming | 0, 1, 2 braked on higher peers; 3 never yielded, as designed | 0 and 2 climbed to the same ~10 m layer; 0 re-latched and climbed again to 12.8 m | Not tested | **0.09 m** (1–3, both at 5 m); also 0–2 2.7 m (2.1 m vertical), 2–3 3.1 m, 0–3 3.9 m at the same height | Yes, but only after 1 hit the ground | `~/m4_runs/m4_headon_run01` on the SITL VM; no ULogs kept | **FAIL**: mid-air collision |
+
+Run 1 notes: drones 1 and 3 fly the same diagonal head-on. They closed at about
+4 m/s, so drone 1 started braking (t+68.3 s, 5.7 m apart) only about 1.3 s before
+contact and never reached its climb. Drone 3 flew through its position at 2 m/s
+(centres 0.09 m apart at t+70.5 s). Drone 1 fell from 5 m to the ground within
+1 s, recovered, and still finished its route; drone 3 was knocked to 3.8 m/s and
+dropped to 4.1 m. The launcher reported the run as Complete. The 5 m trigger
+needs about 5 s at this closing speed (brake, 0.5 s stop, 5 m climb at 1 m/s),
+so at the web launcher's 2 m/s cap the policy cannot clear a head-on pair.
 
 ## Scope of validation and known policy limits
 
