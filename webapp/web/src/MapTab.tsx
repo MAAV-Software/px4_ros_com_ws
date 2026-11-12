@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { droneColor, droneName, INK } from './format';
+import { FreeMap } from './FreeMap';
 import type { Hub } from './useHub';
 import type { Corner, Drone, Snapshot, Trails } from './types';
 
@@ -128,10 +129,16 @@ function FieldCanvas({ drones, trails }: { drones: Drone[]; trails: Trails['poin
       if (!points || points.length === 0) continue;
       context.strokeStyle = droneColor(drone.color);
       context.beginPath();
-      points.forEach(([col, row], index) => {
-        if (index === 0) context.moveTo(x(col), y(row));
-        else context.lineTo(x(col), y(row));
-      });
+      let drawing = false;
+      for (const [, , col, row] of points) {
+        if (col === null || row === null) {
+          drawing = false;
+          continue;
+        }
+        if (drawing) context.lineTo(x(col), y(row));
+        else context.moveTo(x(col), y(row));
+        drawing = true;
+      }
       context.stroke();
     }
     context.restore();
@@ -243,7 +250,98 @@ function CornersForm({ hub, snapshot, onDone }: { hub: Hub; snapshot: Snapshot; 
   );
 }
 
+type MapView = 'competition' | 'free';
+const MAP_VIEWS: { id: MapView; label: string }[] = [
+  { id: 'competition', label: 'Competition' },
+  { id: 'free', label: 'Free' },
+];
+const VIEW_KEY = 'swarm-launcher-map-view';
+
+// Which map this phone last showed. Only a convenience, so it may be lost.
+function storedView(): MapView {
+  try {
+    return localStorage.getItem(VIEW_KEY) === 'free' ? 'free' : 'competition';
+  } catch {
+    return 'competition';
+  }
+}
+
+function DroneList({ drones, withGrid }: { drones: Drone[]; withGrid: boolean }) {
+  return (
+    <ul className="plain map-drones">
+      {drones.map((drone) => (
+        <li key={drone.id} className="check">
+          <span className="map-dot" style={{ background: droneColor(drone.color) }}>
+            {droneNumber(drone.id)}
+          </span>
+          <span>
+            {droneName(drone.id)}: {withGrid ? placeText(drone) : drone.global ? (drone.activity ?? 'No report yet') : 'No position'}
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 export function MapTab({ hub, snapshot }: { hub: Hub; snapshot: Snapshot }) {
+  const [view, setView] = useState<MapView>(storedView);
+  const choose = (next: MapView) => {
+    setView(next);
+    try {
+      localStorage.setItem(VIEW_KEY, next);
+    } catch {
+      // Private browsing and the like: the choice just isn't remembered.
+    }
+  };
+  const drones = snapshot.drones.filter((drone) => drone.connected || drone.in_mission);
+  const trailNote = Object.keys(hub.trails.points).length > 0 && (
+    <p className="quiet small">Lines show where each drone has been this mission, until New mission.</p>
+  );
+
+  return (
+    <div className="stack map-tab">
+      <div className="segmented" role="radiogroup" aria-label="Map">
+        {MAP_VIEWS.map(({ id, label }) => (
+          <button
+            key={id}
+            role="radio"
+            aria-checked={view === id}
+            className={view === id ? 'segment segment-on segment-plain' : 'segment'}
+            onClick={() => choose(id)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {view === 'competition' ? (
+        <CompetitionMap hub={hub} snapshot={snapshot} drones={drones} trailNote={trailNote} />
+      ) : (
+        <>
+          <DroneList drones={drones} withGrid={false} />
+          {trailNote}
+          <FreeMap drones={drones} trails={hub.trails.points} area={snapshot.area} />
+          <p className="quiet small">
+            Drag to move, pinch or scroll to zoom. Fit keeps every drone in view.
+            {snapshot.area ? ' The dashed outline is the search area.' : ''}
+          </p>
+        </>
+      )}
+    </div>
+  );
+}
+
+// The competition's own grid, set by the search area's corners, as the spec describes.
+function CompetitionMap({
+  hub,
+  snapshot,
+  drones,
+  trailNote,
+}: {
+  hub: Hub;
+  snapshot: Snapshot;
+  drones: Drone[];
+  trailNote: React.ReactNode;
+}) {
   const [editing, setEditing] = useState(false);
   const [refused, setRefused] = useState('');
   const area = snapshot.area;
@@ -258,7 +356,7 @@ export function MapTab({ hub, snapshot }: { hub: Hub; snapshot: Snapshot }) {
   };
 
   return (
-    <div className="stack map-tab">
+    <>
       {(!area || editing) && <CornersForm hub={hub} snapshot={snapshot} onDone={() => setEditing(false)} />}
       {fitTo && (!area || editing) && (
         <button
@@ -281,27 +379,9 @@ export function MapTab({ hub, snapshot }: { hub: Hub; snapshot: Snapshot }) {
               Check the corners: {flag}.
             </p>
           ))}
-          <ul className="plain map-drones">
-            {snapshot.drones
-              .filter((drone) => drone.connected || drone.in_mission)
-              .map((drone) => (
-                <li key={drone.id} className="check">
-                  <span className="map-dot" style={{ background: droneColor(drone.color) }}>
-                    {droneNumber(drone.id)}
-                  </span>
-                  <span>
-                    {droneName(drone.id)}: {placeText(drone)}
-                  </span>
-                </li>
-              ))}
-          </ul>
-          {Object.keys(hub.trails.points).length > 0 && (
-            <p className="quiet small">Lines show where each drone has been this mission, until New mission.</p>
-          )}
-          <FieldCanvas
-            drones={snapshot.drones.filter((drone) => drone.connected || drone.in_mission)}
-            trails={hub.trails.points}
-          />
+          <DroneList drones={drones} withGrid />
+          {trailNote}
+          <FieldCanvas drones={drones} trails={hub.trails.points} />
           <div className="row">
             <button className="button" disabled={locked} onClick={() => setEditing(true)}>
               Change corners
@@ -312,6 +392,6 @@ export function MapTab({ hub, snapshot }: { hub: Hub; snapshot: Snapshot }) {
           </div>
         </>
       )}
-    </div>
+    </>
   );
 }

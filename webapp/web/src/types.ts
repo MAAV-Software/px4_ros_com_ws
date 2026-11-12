@@ -127,10 +127,14 @@ export interface Snapshot {
   log_seq: number;
 }
 
-// Where each picked drone has been this mission, as [column, row] points on the grid.
+// One point of a trail: latitude and longitude, and the grid square the hub worked out for
+// it (null with no search area).
+export type TrailPoint = [number, number, number | null, number | null];
+
+// Where each picked drone has been this mission.
 export interface Trails {
   version: number;
-  points: Record<string, [number, number][]>;
+  points: Record<string, TrailPoint[]>;
 }
 
 export interface LogLine {

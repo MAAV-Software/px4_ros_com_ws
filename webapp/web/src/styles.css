@@ -273,8 +273,13 @@ details > summary {
   min-height: 0;
 }
 
+/* Nothing on the Map tab gives up height to the map: the tab scrolls instead. */
+.map-tab > * {
+  flex-shrink: 0;
+}
+
 .map-wrap {
-  flex: 1;
+  flex: 1 0 auto;
   min-height: 320px;
   display: flex;
   justify-content: center;
@@ -334,6 +339,51 @@ details > summary {
 
 .steps li {
   margin-top: 4px;
+}
+
+.segment-on.segment-plain {
+  background: var(--accent-tint);
+  color: var(--accent);
+}
+
+.free-map {
+  position: relative;
+  flex: 1 0 auto;
+  min-height: 360px;
+}
+
+.free-map-canvas {
+  display: block;
+  border: 1px solid var(--edge);
+  border-radius: 8px;
+  touch-action: none;
+  cursor: grab;
+}
+
+.free-map-canvas:active {
+  cursor: grabbing;
+}
+
+.free-map-controls {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.map-control {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 10px;
+  background: var(--paper);
+  font-weight: 600;
+}
+
+.map-control-on {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 .box,

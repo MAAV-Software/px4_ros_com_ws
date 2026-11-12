@@ -748,7 +748,9 @@ def test_a_trail_follows_each_picked_drone_through_its_run(core, links):
     assert len(core.trails['d1']) == 4 and len(core.trails['d2']) == 1
     message, version, counts = core.trail_update(None, {})
     assert message['full'] and version == core.trail_version
-    assert [round(row) for _, row in message['points']['d1']] == [0, 2, 3, 5]
+    assert [round(row) for _, _, _, row in message['points']['d1']] == [0, 2, 3, 5]
+    lat, lon, _, _ = message['points']['d2'][0]
+    assert (lat, lon) == pytest.approx(local_to_global(*HOME, 0, 5), abs=1e-7)
     assert counts == {'d1': 4, 'd2': 1}
 
 
@@ -785,12 +787,24 @@ def test_drones_not_picked_leave_no_trail(core, links):
     assert 'd3' not in core.trails
 
 
-def test_without_an_area_there_are_no_points_to_send(core, links):
+def test_without_an_area_points_still_go_out_for_the_free_map(core, links):
     to_searching(core)
     status(core, 'd1', run_state='running', airborne=True, **at(1, 1))
     message, version, counts = core.trail_update(None, {})
-    assert message['points'] == {}
+    [[lat, lon, col, row]] = message['points']['d1']
+    assert (lat, lon) == pytest.approx(local_to_global(*HOME, 1, 1), abs=1e-7)
+    assert col is None and row is None
     assert core.trail_update(version, counts)[0] is None
+
+
+def test_setting_an_area_resends_the_trail_with_grid_squares(core, links):
+    to_searching(core)
+    status(core, 'd1', run_state='running', airborne=True, **at(1, 1))
+    _, version, counts = core.trail_update(None, {})
+    core.state = IDLE  # Corners can't change during a run.
+    core.set_area(fit_around(*HOME, east_m=0, north_m=0))
+    message, _, _ = core.trail_update(version, counts)
+    assert message['full'] and message['points']['d1'][0][2:] == [pytest.approx(1.64, abs=0.01)] * 2
 
 
 def test_each_drone_keeps_its_own_colour(sitl_core):

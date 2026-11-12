@@ -505,22 +505,28 @@ class HubCore:
 
     def trail_update(self, known_version, known_counts):
         """What a phone hasn't been sent yet: (message or None, version, counts). A phone that
-        has nothing, or an older version, gets everything; otherwise only the new points. Points
-        go out as grid columns and rows, so without a search area there is nothing to send.
+        has nothing, or an older version, gets everything; otherwise only the new points.
+
+        Each point is [lat, lon, column, row]: latitude and longitude for the free map, and the
+        grid square for the competition one, worked out here so every phone agrees. Without a
+        search area the column and row are null.
         """
         full = known_version != self.trail_version
         counts = {} if full else dict(known_counts)
         points = {}
         for drone_id, trail in self.trails.items():
             start = counts.get(drone_id, 0)
-            if self.area and len(trail) > start:
-                points[drone_id] = [[cell['col'], cell['row']]
-                                    for cell in (self.area.cell(*point) for point in trail[start:])]
-            counts[drone_id] = len(trail) if self.area else 0
+            if len(trail) > start:
+                points[drone_id] = [self._trail_point(*point) for point in trail[start:]]
+            counts[drone_id] = len(trail)
         if not full and not points:
             return None, known_version, known_counts
         return ({'type': 'trail', 'version': self.trail_version, 'full': full, 'points': points},
                 self.trail_version, counts)
+
+    def _trail_point(self, lat, lon):
+        cell = self.area.cell(lat, lon) if self.area else None
+        return [round(lat, 8), round(lon, 8), cell and cell['col'], cell and cell['row']]
 
     def _report(self, drone_id):
         return self._drone(drone_id)['status']

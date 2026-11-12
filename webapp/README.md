@@ -152,7 +152,10 @@ The hub's certificate names the addresses it found at startup (it prints them). 
 
 ## Search area and map
 
-The Map tab draws the 80 by 300 ft field as the competition's 40 columns by 150 rows, north up, with each connected drone on it.
+The Map tab has two views, and each phone remembers which it last showed:
+
+- **Competition** draws the 80 by 300 ft field as the competition's 40 columns by 150 rows, north up, with each connected drone on it, as the spec describes. It needs the search area's corners.
+- **Free** is a map with no edges, in metres, north up. Drag to move it, pinch or scroll to zoom, or use its buttons. Fit keeps every drone, trail and the field in view as they move, until you move the map yourself. It needs no search area; with one, the field shows as a dashed outline. Trails that leave the field carry on here, where the Competition view cuts them off at the edge.
 
 Type the four corners as WGS84 degrees (latitude, longitude), ideally from an RTK fix, since a square is only 0.61 m. Corners more than one square away from 80 by 300 ft, out of square, or in the wrong order are flagged, but still used. The hub converts every drone's position with the same transform, so all drones agree. It works each position out from PX4's own `ref_lat`/`ref_lon` and local position, with PX4's projection. A drone off the field is drawn hollow on its edge, with its distance off. The area is kept across restarts, and can't change during a run.
 

@@ -373,7 +373,7 @@ def test_phones_get_each_drones_trail(tmp_path):
 
         trail = asyncio.run(read_phone())
         assert trail['full']
-        col, row = trail['points']['drone1'][0]
+        _, _, col, row = trail['points']['drone1'][0]
         assert (round(col, 1), round(row, 1)) == (3.3, 3.3)
         assert stack.state()['drones'][0]['color'] == 0
 
