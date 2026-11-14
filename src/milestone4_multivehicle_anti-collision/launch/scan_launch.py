@@ -1,11 +1,10 @@
 #!/usr/bin/env python
 """Milestone 4's scan of the competition field for one vehicle, with ORCA anti-collision by default.
 
-The 80 by 300 ft field (24.4 by 91.4 m) is scanned in rows 2 m apart, the camera
-footprint's width. Drones 1-3 (system_id 1-3) each take a third of the width in
-north-south rows, then return to their spawn and land. Drone 4 flies east-west rows
-over the whole field from the south edge northward, crossing the other three, and lands
-at the north end. The routes are resource/milestone4_scan_N.yaml, made by
+The 80 by 300 ft field (24.4 by 91.4 m) is scanned from 5.6 m in 8 north-south rows
+3 m apart, two per drone. Every drone holds its nose east so the camera footprint's
+long side lies across the row, flies north up one row and south down the next, and
+lands 3 m south of the field. The routes are resource/milestone4_scan_N.yaml, made by
 milestone4_multivehicle/scan_routes.py.
 
 Run it once per vehicle, with topic_prefix and system_id saying which PX4 it flies, and

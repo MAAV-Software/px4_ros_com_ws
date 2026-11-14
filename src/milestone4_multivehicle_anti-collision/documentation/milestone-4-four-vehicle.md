@@ -126,6 +126,7 @@ is introduced, preserving the three-field communications protocol.
 | 3 (2026-11-12, uncommitted ORCA) | Same head-on YAMLs and square layout, drones restarted at their spawns; MPC_XY_VEL_MAX 1 m/s; `avoidance:=orca`, `max_speed:=1.0` (measured max 1.04–1.05 m/s) | All four correct; all armed and accepted offboard | n/a: no priority; all four AVOIDING from t+84.8–85.1 s to t+91.5–91.9 s | No climbs: all four stayed at 5.0 m | Not tested | **2.99 m** (1–2), 0–1 3.03 m, 0–3 3.05 m, 2–3 3.08 m, 0–2 4.24 m, 1–3 4.36 m; all at the same height | Yes, all four reached waypoint 1 within 0.2 s of each other and landed; mission complete in 1:04 | `~/m4_runs/m4_headon_run03_orca` on the SITL VM; no ULogs kept | **No contact; every pair held the 3 m ORCA spacing** |
 | 4 (2026-11-12, uncommitted ORCA + scan) | `scan_launch.py` field scan; web launcher "South edge of the field" layout, test field placed from it; 1 m/s, `avoidance:=orca` (max 1.07–1.09 m/s) | All four correct; all armed | n/a; AVOIDING 11 times, 1–10 s each | No climbs: all at 5.0 m | Not tested | **3.01 m** (1–3 and 2–3, each with drone 3 crossing a strip); 0–3 4.63 m, 0–1 5.60 m | Drones 0–2 yes (airborne 410, 413 and 589 s). Drone 3 was aborted by the operator at about 10 min, about halfway through its 46 rows | `~/m4_runs/m4_scan_run01_orca` (positions and /rosout only) | **No contact, but strip coverage only 79%** |
 | 5 (2026-11-12, uncommitted ORCA + scan, drift fix) | Same as run 4; ORCA now biases right only while it changes the velocity, and follows the leg from the previous waypoint | All four correct; all armed | n/a; AVOIDING 18 times, 1–10 s each | No climbs: all at 5.0 m | Not tested | **2.99 m** (1–3 and 2–3); 0–3 3.03 m, 0–1 5.88 m | Drones 0–2 yes. Drone 3 aborted by the operator once it was the only one flying | `~/m4_runs/m4_scan_run02_orca` (positions and /rosout only) | **No contact; strip coverage 99.8%** |
+| 6 (2026-11-14, 8-row scan) | `scan_launch.py` with the 8-row plan: two north-south rows per drone at 5.6 m, nose east; same "South edge of the field" layout and test field; 1 m/s, `avoidance:=orca` (max 1.07–1.08 m/s) | All four correct; all armed | n/a; AVOIDING 7 times, 1–2 s each: drone 3 once leaving its spawn, the rest at the step east between rows | No climbs: all at 5.6 m | Not tested | **5.07 m** (1–2, at the step east); 0–1 5.92 m, 2–3 5.94 m | Yes, all four: airborne 221–222 s, landed 3 m south of the field | `~/m4_runs/m4_scan_run03_8row` (positions, shared positions and /rosout) | **No contact; coverage 100.00%; 3 min 41 s** |
 
 Run 1 notes: drones 1 and 3 fly the same diagonal head-on. They closed at about
 4 m/s, so drone 1 started braking (t+68.3 s, 5.7 m apart) only about 1.3 s before
@@ -171,6 +172,18 @@ sidestep. Airborne times read 797, 794 and 976 s, but every drone's position str
 stopped at t+363 s for 387 s at once, with no drone moving: the SITL VM itself was paused
 (its journal is empty from 16:47 to 16:58 UTC, then "Clock change detected"). Without that
 gap drones 0 and 1 flew about 410 s, as in run 4, so the fix cost no time.
+
+Run 6 notes: the first flight of the 8-row plan (two rows per drone, nose east, 5.6 m).
+All four were airborne for 221–222 s, against about 410 s (drones 0 and 1) and 589 s
+(drone 2) for the 13-row plan in run 4, and the web launcher's mission clock read 227 s.
+Coverage, measured from each track with a 3.36 m by 2.24 m footprint oriented by heading,
+was 100.00% of the field's 0.25 m cells, each drone seeing about 26%. Cross-track error on
+the rows was 0.01 m median, 0.03 m at the 90th percentile and 0.07 m at worst, and yaw
+stayed within 0.1 degrees of east. Drones on neighbouring rows were 5.9–6.0 m apart
+except at the step east, where drones that had shorter transits from their spawns were
+about a second ahead and closed to 5.07 m; ORCA went AVOIDING for 1–2 s there without
+moving anyone off a row. No position stream had a gap over 0.8 s. The unit-test
+fly-through of the same routes finishes within 215 s and keeps 5 m.
 
 ## Scope of validation and known policy limits
 
