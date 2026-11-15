@@ -1,12 +1,16 @@
 #!/usr/bin/env python
 """Milestone 4's scan of the competition field for one vehicle, with ORCA anti-collision by default.
 
-The 80 by 300 ft field (24.4 by 91.4 m) is scanned in rows 2 m apart, the camera
-footprint's width. Drones 1-3 (system_id 1-3) each take a third of the width in
-north-south rows, then return to their spawn and land. Drone 4 flies east-west rows
-over the whole field from the south edge northward, crossing the other three, and lands
-at the north end. The routes are resource/milestone4_scan_N.yaml, made by
-milestone4_multivehicle/scan_routes.py.
+The 80 by 300 ft field (24.4 by 91.4 m) is scanned from 5.6 m in 9 north-south rows
+2.63 m apart. Drones 1-3 mow three rows each, nose east so the camera footprint's long
+side lies across the row, and land 3 m north of the field. Drone 4 is the checker. The
+routes are resource/milestone4_scan_N.yaml, made by milestone4_multivehicle/scan_routes.py.
+
+150 simulated mines are hidden on the field (mines:=0 for none). Each time one passes
+under a drone's camera it is found with probability detect_probability. While the
+others mow, the best path through the ground scanned so far is planned again and again,
+and drone 4 flies whatever part of it it has not yet looked at; see
+milestone4_multivehicle/mines.py.
 
 Run it once per vehicle, with topic_prefix and system_id saying which PX4 it flies, and
 give every drone the same other arguments. The default origins are the web launcher's
@@ -23,4 +27,4 @@ from milestone4_multivehicle.scan_routes import SPAWNS
 
 
 def generate_launch_description():
-    return fleet_launch_description('milestone4_scan', SPAWNS)
+    return fleet_launch_description('milestone4_scan', SPAWNS, mines=150)

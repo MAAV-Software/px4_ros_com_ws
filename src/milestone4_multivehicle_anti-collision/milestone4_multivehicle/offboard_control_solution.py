@@ -29,6 +29,7 @@ from milestone4_multivehicle.vehicle import declare_vehicle
 from milestone4_multivehicle.avoidance import Avoidance, POSITION_TOPIC
 from milestone4_multivehicle.avoidance import PEER_TIMEOUT_S as OWN_POSITION_TIMEOUT_S
 from milestone4_multivehicle.orca_avoidance import OrcaAvoidance
+from milestone4_multivehicle.mines import read_message
 from std_msgs.msg import Float64MultiArray
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
@@ -42,6 +43,10 @@ from px4_msgs.msg import (
     VehicleLocalPosition,
 )
 
+PATH_TOPIC = '/milestone4/best_path'
+ROUTE_WAIT_S = 60.0  # the checker lands if the mine survey is silent this long
+FINAL_HOLD_S = 2.0
+TAKEN_OFF_M = 3.0
 ACCEPTANCE_RADIUS = 0.5  # metres — how close counts as "reached" a waypoint
 ARM_AFTER_TICKS = 10     # send setpoints this many ticks before arming/switching to offboard
 PX4_CUSTOM_MAIN_MODE_OFFBOARD = 6.0
@@ -148,6 +153,21 @@ class OffboardControl(Node):
         self.global_position_sub = self.create_subscription(
             Float64MultiArray, POSITION_TOPIC, self.on_global_position, shared_qos)
 
+        # The checker: the mine survey (mine_field_node) keeps sending this drone the next
+        # stretch of the best path to look at. Each route replaces whatever is left of the
+        # last one at once; with none left the drone waits where it is, and it lands only
+        # at the end of a route marked final.
+        self.declare_parameter('second_pass', False)
+        self.second_pass = bool(self.get_parameter('second_pass').value)
+        self.declare_parameter('route_topic', PATH_TOPIC)
+        self.route = None                # latest (version, final, points)
+        self.route_version = 0
+        self.route_heard_ns = None
+        self.route_wait_started_ns = None
+        if self.second_pass:
+            self.route_sub = self.create_subscription(
+                Float64MultiArray, self.get_parameter('route_topic').value, self.on_route, 10)
+
         self.get_logger().info(
             f'targeting {self.vehicle.namespace or "/"}, system {self.vehicle.system_id}')
         self.get_logger().info(f'loaded {len(self.waypoints)} waypoints from {waypoints_file}')
@@ -180,6 +200,45 @@ class OffboardControl(Node):
     def valid_position(msg):
         return (msg is not None and msg.xy_valid and msg.z_valid
                 and all(math.isfinite(v) for v in (msg.x, msg.y, msg.z, msg.heading)))
+
+    def on_route(self, msg):
+        route = read_message(list(msg.data))
+        if route is not None:
+            self.route = route
+            self.route_heard_ns = self.get_clock().now().nanoseconds
+
+    def take_route(self):
+        """Swap the rest of this drone's waypoints for a newer route from the survey."""
+        if self.route is None or self.route[0] <= self.route_version or not self.valid_position(self.current_position):
+            return
+        if -self.current_position.z < TAKEN_OFF_M:
+            return  # still climbing out over its spawn
+        version, final, points = self.route
+        origin_x, origin_y = self.avoidance.origin
+        new = [{'pos': (north - origin_y, east - origin_x, -up), 'yaw': yaw, 'hold_s': 0.0}
+               for east, north, up, yaw in points]
+        if final:
+            new[-1]['hold_s'] = FINAL_HOLD_S
+        # Where the drone is now starts the new route, so ORCA follows the leg from here.
+        here = {'pos': (self.current_position.x, self.current_position.y, new[0]['pos'][2]),
+                'yaw': new[0]['yaw'], 'hold_s': 0.0}
+        self.waypoints[self.waypoint_index:] = [here] + new
+        self.waypoint_index += 1
+        self.route_version = version
+        self.route_wait_started_ns = None
+        self.hold_started_ns = None
+        if final:
+            self.get_logger().info('Checker: the path is final; flying to land')
+
+    def route_final(self):
+        return self.route is not None and self.route[1] and self.route[0] == self.route_version
+
+    def survey_silent(self, now_ns):
+        """True once the survey has not been heard from for ROUTE_WAIT_S while this drone waits."""
+        if self.route_wait_started_ns is None:
+            self.route_wait_started_ns = now_ns
+        last = max(self.route_wait_started_ns, self.route_heard_ns or 0)
+        return now_ns - last >= ROUTE_WAIT_S * 1e9
 
     def on_global_position(self, msg):
         self.avoidance.receive(msg.data, self.get_clock().now().nanoseconds / 1e9)
@@ -265,6 +324,8 @@ class OffboardControl(Node):
         if ready or self.confirmed_offboard:
             self.tick += 1
 
+        if self.confirmed_offboard and self.second_pass:
+            self.take_route()
         if self.confirmed_offboard and not paused:
             self.advance_waypoint_if_reached()
 
@@ -316,6 +377,11 @@ class OffboardControl(Node):
             # PX4's landing doesn't avoid anyone: wait until ORCA has been quiet
             # for a second. The hold is kept, so this lands on the next clear tick.
             return
+        if last and self.second_pass and not self.route_final():
+            # Wait here for the survey's next stretch, as long as it is still talking.
+            if not self.survey_silent(now_ns):
+                return
+            self.get_logger().warn(f'Nothing from the mine survey for {ROUTE_WAIT_S:.0f} s; landing')
         self.hold_started_ns = None
         if not last:
             self.waypoint_index += 1

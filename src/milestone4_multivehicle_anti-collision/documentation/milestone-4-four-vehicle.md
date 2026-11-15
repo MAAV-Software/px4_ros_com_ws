@@ -126,6 +126,11 @@ is introduced, preserving the three-field communications protocol.
 | 3 (2026-11-12, uncommitted ORCA) | Same head-on YAMLs and square layout, drones restarted at their spawns; MPC_XY_VEL_MAX 1 m/s; `avoidance:=orca`, `max_speed:=1.0` (measured max 1.04–1.05 m/s) | All four correct; all armed and accepted offboard | n/a: no priority; all four AVOIDING from t+84.8–85.1 s to t+91.5–91.9 s | No climbs: all four stayed at 5.0 m | Not tested | **2.99 m** (1–2), 0–1 3.03 m, 0–3 3.05 m, 2–3 3.08 m, 0–2 4.24 m, 1–3 4.36 m; all at the same height | Yes, all four reached waypoint 1 within 0.2 s of each other and landed; mission complete in 1:04 | `~/m4_runs/m4_headon_run03_orca` on the SITL VM; no ULogs kept | **No contact; every pair held the 3 m ORCA spacing** |
 | 4 (2026-11-12, uncommitted ORCA + scan) | `scan_launch.py` field scan; web launcher "South edge of the field" layout, test field placed from it; 1 m/s, `avoidance:=orca` (max 1.07–1.09 m/s) | All four correct; all armed | n/a; AVOIDING 11 times, 1–10 s each | No climbs: all at 5.0 m | Not tested | **3.01 m** (1–3 and 2–3, each with drone 3 crossing a strip); 0–3 4.63 m, 0–1 5.60 m | Drones 0–2 yes (airborne 410, 413 and 589 s). Drone 3 was aborted by the operator at about 10 min, about halfway through its 46 rows | `~/m4_runs/m4_scan_run01_orca` (positions and /rosout only) | **No contact, but strip coverage only 79%** |
 | 5 (2026-11-12, uncommitted ORCA + scan, drift fix) | Same as run 4; ORCA now biases right only while it changes the velocity, and follows the leg from the previous waypoint | All four correct; all armed | n/a; AVOIDING 18 times, 1–10 s each | No climbs: all at 5.0 m | Not tested | **2.99 m** (1–3 and 2–3); 0–3 3.03 m, 0–1 5.88 m | Drones 0–2 yes. Drone 3 aborted by the operator once it was the only one flying | `~/m4_runs/m4_scan_run02_orca` (positions and /rosout only) | **No contact; strip coverage 99.8%** |
+| 6 (2026-11-14, 8-row scan) | `scan_launch.py` with the 8-row plan: two north-south rows per drone at 5.6 m, nose east; same "South edge of the field" layout and test field; 1 m/s, `avoidance:=orca` (max 1.07–1.08 m/s) | All four correct; all armed | n/a; AVOIDING 7 times, 1–2 s each: drone 3 once leaving its spawn, the rest at the step east between rows | No climbs: all at 5.6 m | Not tested | **5.07 m** (1–2, at the step east); 0–1 5.92 m, 2–3 5.94 m | Yes, all four: airborne 221–222 s, landed 3 m south of the field | `~/m4_runs/m4_scan_run03_8row` (positions, shared positions and /rosout) | **No contact; coverage 100.00%; 3 min 41 s** |
+| 7 (2026-11-14, mine simulation, not committed in this form) | Run 6's 8-row scan plus 150 simulated mines (seed 10, each look finds a mine with probability 0.9); drone 4 re-flies the best path | All four correct; all armed | n/a | Drone 4 climbed to 10 m, then 8.4 m, for its second looks; the rest at 5.6 m | Not tested | **5.10 m** (1–2); 2–3 5.37 m as drone 4 left for the path | Yes: drones 0–2 airborne 220–221 s, drone 3 493 s, landing at its own place south of the field | `~/m4_runs/m4_scan_run04_mines` (positions, /rosout, mines and best_path) | **Final path clear of all 150 real mines after two second looks; 7.6 min** |
+| 8 (2026-11-14, live checker) | 9 rows at 5.6 m, three each for drones 0–2; drone 3 checks the best path through scanned ground while they mow; 150 simulated mines (seed 10, probability 0.9) | All four correct; all armed | n/a; AVOIDING 13 times, 1–9 s each, mostly the checker beside a mower | Checker at 5.6 m, then 8.4 m once the path had a green zone of 2; mowers at 5.6 m | Not tested | **2.99 m** (2–3, a mower passing the checker on the next row); mowers 6.74 m apart or more | Yes: mowers airborne 315–317 s, landing 3 m north of the field; checker 562 s | `~/m4_runs/m4_scan_run05_checker` (positions, /rosout, mines and best_path) | **Final path clear of all 150 real mines and fully checked at 7.55 min** |
+| 9 (2026-11-15, corridor search before a fix) | `corridor_launch.py`, 2x2 formation, 150 simulated mines (seed 10, probability 0.9); same layout and test field; 1 m/s | All four correct; all armed | n/a; AVOIDING 21 times | All at 5.6 m | Not tested | **3.10 m** (1–2) | Yes: airborne 156–158 s, landed north of the field | `~/m4_runs/m4_corridor_run01_2x2` | **Path at 2.41 min but two sidesteps 3 s apart (a bug) and 2 real mines in the green zone: score 49.6** |
+| 10 (2026-11-15, corridor search) | Same as run 9 with the sidestep fix | All four correct; all armed | n/a; AVOIDING 15 times, all brief | All at 5.6 m | Not tested | **3.13 m** (1–2, side by side in formation; planned spacing 3.2 m); 0–3 3.16 m while landing | Yes: airborne 155–157 s, landed north of the field | `~/m4_runs/m4_corridor_run02_2x2` (positions, /rosout, mines) | **Path clear of all real mines at 2.40 min: score 149.5** |
 
 Run 1 notes: drones 1 and 3 fly the same diagonal head-on. They closed at about
 4 m/s, so drone 1 started braking (t+68.3 s, 5.7 m apart) only about 1.3 s before
@@ -171,6 +176,62 @@ sidestep. Airborne times read 797, 794 and 976 s, but every drone's position str
 stopped at t+363 s for 387 s at once, with no drone moving: the SITL VM itself was paused
 (its journal is empty from 16:47 to 16:58 UTC, then "Clock change detected"). Without that
 gap drones 0 and 1 flew about 410 s, as in run 4, so the fix cost no time.
+
+Run 6 notes: the first flight of the 8-row plan (two rows per drone, nose east, 5.6 m).
+All four were airborne for 221–222 s, against about 410 s (drones 0 and 1) and 589 s
+(drone 2) for the 13-row plan in run 4, and the web launcher's mission clock read 227 s.
+Coverage, measured from each track with a 3.36 m by 2.24 m footprint oriented by heading,
+was 100.00% of the field's 0.25 m cells, each drone seeing about 26%. Cross-track error on
+the rows was 0.01 m median, 0.03 m at the 90th percentile and 0.07 m at worst, and yaw
+stayed within 0.1 degrees of east. Drones on neighbouring rows were 5.9–6.0 m apart
+except at the step east, where drones that had shorter transits from their spawns were
+about a second ahead and closed to 5.07 m; ORCA went AVOIDING for 1–2 s there without
+moving anyone off a row. No position stream had a gap over 0.8 s. The unit-test
+fly-through of the same routes finishes within 215 s and keeps 5 m.
+
+Run 7 notes: the first flight with simulated mines. The first scan found 132 of the 150
+mines (drones 1–4 found 23, 41, 31 and 37 of them) and covered 100.00% of the field, as
+in run 6. Path 1, planned at 3.43 min, was `S,29,3 U,22 R,5 U,20 L,2 U,9 L,4 U,3 L,14
+U,22 R,15 U,38 L,8 U,19 R,6 U,17` (green zone 3, 408 ft) and had one unfound mine in its
+green zone. Drone 4's first second look, from 10 m, saw every one of the path's 1428
+squares and found that mine. Path 2, at 5.62 min, was `S,6,2 U,46 R,1 U,31 R,24 U,38 R,5
+U,35` (green zone 2, 360 ft). The second look, flown north to south from 8.4 m, saw all
+900 squares and found two more mines, neither on the path or in its green zone, so
+path 2 became final at 7.57 min, with 135 of 150 mines found and no real mine on it or in
+its green zone. Scores by the competition formula, counting the real mines: path 1 at
+3.43 min 102.9 (halved by the mine in its green zone), path 2 at 5.62 min 103.3, and
+the same path once confirmed at 7.57 min 77.2. So in this run the second looks removed a
+real mine from the green zone, and the confirming look cost a quarter of the score.
+
+Run 8 notes: three mowers and a live checker. The mowers covered 100.00% of the field
+(cross-track 0.01 m median; drone 2 was pushed 0.64 m off a row once by the checker) and
+finished at 5.0 min with 141 of 150 mines found. The path grew behind them: partial paths
+up one strip from 0.4 min, a complete path with no green zone at 1.9 min (`S,29,0 U,150`),
+green zone 1 at 3.0 min and green zone 2 from 4.5 min. It changed three more times as the
+last rows came in, ending on `S,6,2 U,46 R,1 U,31 R,24 U,38 R,5 U,35`, the same path as
+run 7, final at 7.55 min with a score of 77.4 (run 7: 7.57 min, 77.2). The checker had
+looked at all 900 of its squares, found 12 mines of its own, and had also looked at 1613
+squares that ended up off the path. No real mine was on the path or in its green zone.
+So checking during the scan did not finish sooner than checking after it: the 9-row scan
+by three drones takes 1.6 min longer than the 8-row scan by four, and the wide path
+that wins only appears once the last rows are scanned, on the far side of the field
+from where the checker had been working. The checker then needed 97 s more to fly from
+the south end to its landing place, which does not count toward the score.
+
+Runs 9 and 10 notes: the corridor search, four drones in a 2x2 formation over one 6.6 m
+band. In run 10 the formation was joined at the south edge 30 s after the bag started
+and set off north. At row 82 a path with a green zone of 1 stopped getting through, so
+all four sidestepped 5.5 m east, restarted from row 77 and carried on. The transit ended
+at 2.40 min with 1991 of the 6000 squares scanned and 56 mines found. The path was
+`S,17,1 U,35 R,2 U,30 L,3 U,13 R,7 U,3 R,2 U,27 R,5 U,42` (green zone 1, 338 ft), with at
+least two looks at every square of it, an estimated 3.5% chance of a mine on the path,
+and no real mine on it or in its green zone: a score of 149.5, against 77.4 in run 8 and
+77.2 in run 7. Run 9 had sidestepped twice within 3 s, because the block check resumed
+before the drones had left the old band; its second step moved the band so that part of
+the final path had one look only, and two real mines were in its green zone (score 49.6).
+The check now waits until the drones are in the new band's lanes. Drones in formation
+were 3.1–3.2 m apart side by side, close to the 3 m limit, and ORCA went AVOIDING 15
+times for a second or two without breaking the formation.
 
 ## Scope of validation and known policy limits
 
