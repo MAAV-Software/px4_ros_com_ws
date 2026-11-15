@@ -129,6 +129,8 @@ is introduced, preserving the three-field communications protocol.
 | 6 (2026-11-14, 8-row scan) | `scan_launch.py` with the 8-row plan: two north-south rows per drone at 5.6 m, nose east; same "South edge of the field" layout and test field; 1 m/s, `avoidance:=orca` (max 1.07–1.08 m/s) | All four correct; all armed | n/a; AVOIDING 7 times, 1–2 s each: drone 3 once leaving its spawn, the rest at the step east between rows | No climbs: all at 5.6 m | Not tested | **5.07 m** (1–2, at the step east); 0–1 5.92 m, 2–3 5.94 m | Yes, all four: airborne 221–222 s, landed 3 m south of the field | `~/m4_runs/m4_scan_run03_8row` (positions, shared positions and /rosout) | **No contact; coverage 100.00%; 3 min 41 s** |
 | 7 (2026-11-14, mine simulation, not committed in this form) | Run 6's 8-row scan plus 150 simulated mines (seed 10, each look finds a mine with probability 0.9); drone 4 re-flies the best path | All four correct; all armed | n/a | Drone 4 climbed to 10 m, then 8.4 m, for its second looks; the rest at 5.6 m | Not tested | **5.10 m** (1–2); 2–3 5.37 m as drone 4 left for the path | Yes: drones 0–2 airborne 220–221 s, drone 3 493 s, landing at its own place south of the field | `~/m4_runs/m4_scan_run04_mines` (positions, /rosout, mines and best_path) | **Final path clear of all 150 real mines after two second looks; 7.6 min** |
 | 8 (2026-11-14, live checker) | 9 rows at 5.6 m, three each for drones 0–2; drone 3 checks the best path through scanned ground while they mow; 150 simulated mines (seed 10, probability 0.9) | All four correct; all armed | n/a; AVOIDING 13 times, 1–9 s each, mostly the checker beside a mower | Checker at 5.6 m, then 8.4 m once the path had a green zone of 2; mowers at 5.6 m | Not tested | **2.99 m** (2–3, a mower passing the checker on the next row); mowers 6.74 m apart or more | Yes: mowers airborne 315–317 s, landing 3 m north of the field; checker 562 s | `~/m4_runs/m4_scan_run05_checker` (positions, /rosout, mines and best_path) | **Final path clear of all 150 real mines and fully checked at 7.55 min** |
+| 9 (2026-11-15, corridor search before a fix) | `corridor_launch.py`, 2x2 formation, 150 simulated mines (seed 10, probability 0.9); same layout and test field; 1 m/s | All four correct; all armed | n/a; AVOIDING 21 times | All at 5.6 m | Not tested | **3.10 m** (1–2) | Yes: airborne 156–158 s, landed north of the field | `~/m4_runs/m4_corridor_run01_2x2` | **Path at 2.41 min but two sidesteps 3 s apart (a bug) and 2 real mines in the green zone: score 49.6** |
+| 10 (2026-11-15, corridor search) | Same as run 9 with the sidestep fix | All four correct; all armed | n/a; AVOIDING 15 times, all brief | All at 5.6 m | Not tested | **3.13 m** (1–2, side by side in formation; planned spacing 3.2 m); 0–3 3.16 m while landing | Yes: airborne 155–157 s, landed north of the field | `~/m4_runs/m4_corridor_run02_2x2` (positions, /rosout, mines) | **Path clear of all real mines at 2.40 min: score 149.5** |
 
 Run 1 notes: drones 1 and 3 fly the same diagonal head-on. They closed at about
 4 m/s, so drone 1 started braking (t+68.3 s, 5.7 m apart) only about 1.3 s before
@@ -215,6 +217,21 @@ by three drones takes 1.6 min longer than the 8-row scan by four, and the wide p
 that wins only appears once the last rows are scanned, on the far side of the field
 from where the checker had been working. The checker then needed 97 s more to fly from
 the south end to its landing place, which does not count toward the score.
+
+Runs 9 and 10 notes: the corridor search, four drones in a 2x2 formation over one 6.6 m
+band. In run 10 the formation was joined at the south edge 30 s after the bag started
+and set off north. At row 82 a path with a green zone of 1 stopped getting through, so
+all four sidestepped 5.5 m east, restarted from row 77 and carried on. The transit ended
+at 2.40 min with 1991 of the 6000 squares scanned and 56 mines found. The path was
+`S,17,1 U,35 R,2 U,30 L,3 U,13 R,7 U,3 R,2 U,27 R,5 U,42` (green zone 1, 338 ft), with at
+least two looks at every square of it, an estimated 3.5% chance of a mine on the path,
+and no real mine on it or in its green zone: a score of 149.5, against 77.4 in run 8 and
+77.2 in run 7. Run 9 had sidestepped twice within 3 s, because the block check resumed
+before the drones had left the old band; its second step moved the band so that part of
+the final path had one look only, and two real mines were in its green zone (score 49.6).
+The check now waits until the drones are in the new band's lanes. Drones in formation
+were 3.1–3.2 m apart side by side, close to the 3 m limit, and ORCA went AVOIDING 15
+times for a second or two without breaking the formation.
 
 ## Scope of validation and known policy limits
 

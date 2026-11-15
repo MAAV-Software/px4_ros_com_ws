@@ -159,13 +159,14 @@ class OffboardControl(Node):
         # at the end of a route marked final.
         self.declare_parameter('second_pass', False)
         self.second_pass = bool(self.get_parameter('second_pass').value)
+        self.declare_parameter('route_topic', PATH_TOPIC)
         self.route = None                # latest (version, final, points)
         self.route_version = 0
         self.route_heard_ns = None
         self.route_wait_started_ns = None
         if self.second_pass:
             self.route_sub = self.create_subscription(
-                Float64MultiArray, PATH_TOPIC, self.on_route, 10)
+                Float64MultiArray, self.get_parameter('route_topic').value, self.on_route, 10)
 
         self.get_logger().info(
             f'targeting {self.vehicle.namespace or "/"}, system {self.vehicle.system_id}')

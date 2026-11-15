@@ -20,10 +20,12 @@ from px4_msgs.msg import VehicleLocalPosition
 from std_msgs.msg import Float64MultiArray
 
 from milestone4_multivehicle import scan_routes
+from milestone4_multivehicle.corridor import CorridorSearch
 from milestone4_multivehicle.mines import MineSurvey, place_mines
 
 MINES_TOPIC = '/milestone4/mines'
 PATH_TOPIC = '/milestone4/best_path'
+ROUTE_TOPIC = '/milestone4/route_{}'  # corridor search: one route topic per drone
 
 
 class MineField(Node):
@@ -34,6 +36,8 @@ class MineField(Node):
         self.declare_parameter('detect_probability', 0.9)
         self.declare_parameter('vehicle_count', 4)
         self.declare_parameter('path_file', '/tmp/milestone4_path.txt')
+        self.declare_parameter('search', 'mow')
+        self.declare_parameter('formation', 'auto')
         count = self.get_parameter('vehicle_count').value
         self.origins = []
         for i in range(count):
@@ -44,8 +48,13 @@ class MineField(Node):
                                  self.get_parameter(f'spawn_y_{i + 1}').value))
         seed = self.get_parameter('mine_seed').value
         mines = place_mines(self.get_parameter('mine_count').value, seed)
-        self.survey = MineSurvey(mines, self.get_parameter('detect_probability').value, seed,
-                                 count, log=self.get_logger().info)
+        probability, log = self.get_parameter('detect_probability').value, self.get_logger().info
+        self.corridor = self.get_parameter('search').value == 'corridor'
+        if self.corridor:
+            self.survey = CorridorSearch(mines, probability, seed, count,
+                                         self.get_parameter('formation').value, log=log)
+        else:
+            self.survey = MineSurvey(mines, probability, seed, count, log=log)
         self.written = None
         self.positions = {}
         px4_qos = QoSProfile(
@@ -58,6 +67,8 @@ class MineField(Node):
             for i in range(count)]
         self.mines_pub = self.create_publisher(Float64MultiArray, MINES_TOPIC, 50)
         self.path_pub = self.create_publisher(Float64MultiArray, PATH_TOPIC, 10)
+        self.route_pubs = [self.create_publisher(Float64MultiArray, ROUTE_TOPIC.format(i), 10)
+                           for i in range(count)] if self.corridor else []
         self.get_logger().info(
             f'{len(mines)} mines hidden (seed {seed}); each look finds one with probability '
             f"{self.get_parameter('detect_probability').value:g}")
@@ -88,7 +99,11 @@ class MineField(Node):
             self.get_logger().warn(f'could not write {path_file}: {error}')
 
     def publish_path(self):
-        self.path_pub.publish(Float64MultiArray(data=self.survey.message()))
+        if self.corridor:
+            for drone, pub in enumerate(self.route_pubs):
+                pub.publish(Float64MultiArray(data=self.survey.message(drone)))
+        else:
+            self.path_pub.publish(Float64MultiArray(data=self.survey.message()))
 
 
 def main():

@@ -116,6 +116,47 @@ assumes: the green zone is every square within G squares of the path in any
 direction, the path keeps G squares from the east and west edges, and a camera finds
 mines as well from 12 m as from 5.6 m.
 
+### Corridor search: `corridor_launch.py`
+
+Instead of mowing the whole field, all four drones scan one band of it in formation
+and the path is planned inside the band. The competition score falls with every
+minute, and research simulations (repeat whole-field scans, corridor searches and
+re-checks, at detection probabilities of 0.5 to 0.99) found a band search ahead of
+every whole-field plan at 5.6 m. The logic is in `milestone4_multivehicle/corridor.py`
+and runs in the same `mine_field` node, with the same simulated mines and arguments
+as the scan (`mines`, `mine_seed`, `detect_probability`, `path_file`).
+
+| `formation` | Looks at each square | Band | `auto` picks it when `detect_probability` is |
+|---|---|---|---|
+| `abreast` | 1 | 13.0 m | 0.97 or more |
+| `2x2` | 2 | 6.6 m | 0.85 to 0.97 |
+| `astern` | 4 | 3.4 m | below 0.85 |
+
+- **Join-up.** Each drone's route file is only a takeoff. The node sends every drone
+  to its slot at the south edge (drones side by side 3.2 m apart, one behind another
+  4 m apart), and sets them off north together once all four are in place, nose east
+  at 5.6 m.
+- **Sidestep.** Every 3 s the node checks how far a path with a green zone of 1 gets
+  through the scanned ground. If it stops 10 rows or more behind the rear drone, the
+  band is blocked: every drone moves by the same vector, sideways to the next band
+  beyond everything flown so far and back to 5 rows south of the block, then north
+  again. It steps away from the found mines just past the block, keeps going the
+  same way on later blocks until that side of the field is used up, and stops after
+  8 sidesteps.
+- **Final path.** When the rear drones reach the north end, the node takes the
+  complete path with the best expected score: width over length, times the chance
+  that no mine is on it, times the expected green-zone penalty. It uses how many
+  times each square was looked at, and tries paths through squares seen at least
+  1, 2, 3, 4, 6 and 8 times. The log gives the estimated chance of a mine on the
+  path next to the real count.
+- **Landing.** The drones land where they finish, 3 m apart or more, up to 15 m north
+  of the field for the astern formation.
+
+Not built: re-checking the chosen path afterwards (the research's pick at 0.75 when
+the risk must stay under 5%), and flying higher. Offline over 12 mine layouts the
+formations scored 185 (abreast, 0.99), 112 (2x2, 0.9), 79 (astern, 0.75) and 60
+(astern, 0.5), with a mine on the path in 2, 0, 0 and 4 of the 12.
+
 ### Anti-collision: `avoidance:=orca` (default) or `avoidance:=priority`
 
 **ORCA** (Optimal Reciprocal Collision Avoidance, `orca.py` and

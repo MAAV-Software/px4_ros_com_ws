@@ -40,7 +40,7 @@ def check_waypoints(path):
             raise ValueError(f'{path}: expected three finite coordinates, finite yaw and nonnegative hold_s')
 
 
-def launch_vehicle(context, mines=False):
+def launch_vehicle(context, mines=False, search='mow'):
     def value(name):
         return LaunchConfiguration(name).perform(context)
 
@@ -72,6 +72,9 @@ def launch_vehicle(context, mines=False):
     if mine_count < 0:
         raise ValueError('mines must be 0 (no mines) or more')
     surveyor = mine_count > 0 and instance == count - 1
+    corridor = search == 'corridor'
+    if corridor and (mine_count == 0 or count != 4):
+        raise ValueError('the corridor search needs mines and four vehicles')
     extras = []
     if surveyor:
         probability = float(value('detect_probability'))
@@ -83,7 +86,8 @@ def launch_vehicle(context, mines=False):
             package=PACKAGE, executable='mine_field', name='mine_field', output='screen',
             parameters=[{'mine_count': mine_count, 'mine_seed': int(value('mine_seed')),
                          'detect_probability': probability, 'vehicle_count': count,
-                         'path_file': value('path_file'), **spawns}]))
+                         'path_file': value('path_file'), 'search': search,
+                         'formation': value('formation') if corridor else 'auto', **spawns}]))
 
     params = {
         'vehicle_instance': instance,
@@ -98,7 +102,8 @@ def launch_vehicle(context, mines=False):
         package=PACKAGE, executable='offboard_solution', name=f'offboard_control_{instance}',
         parameters=[{**params, 'waypoints_file': path,
                      'initial_global_x': origin[0], 'initial_global_y': origin[1],
-                     'avoidance': policy, 'max_speed': max_speed, 'second_pass': surveyor}],
+                     'avoidance': policy, 'max_speed': max_speed, 'second_pass': surveyor or corridor,
+                     'route_topic': f'/milestone4/route_{instance}' if corridor else '/milestone4/best_path'}],
         output='screen')
 
     def when_ready(event, context):
@@ -114,7 +119,7 @@ def launch_vehicle(context, mines=False):
     return [RegisterEventHandler(OnProcessExit(target_action=waiter, on_exit=when_ready)), waiter, *extras]
 
 
-def fleet_launch_description(route_prefix, origins, mines=None):
+def fleet_launch_description(route_prefix, origins, mines=None, search='mow'):
     """One vehicle of a fleet flying resource/<route_prefix>_N.yaml from world origins[N].
     `mines` is the default number of simulated mines, for launch files that hunt them."""
     def route(instance):
@@ -156,5 +161,9 @@ def fleet_launch_description(route_prefix, origins, mines=None):
             DeclareLaunchArgument('path_file', default_value='/tmp/milestone4_path.txt',
                                   description="Where the best path is written, in the competition's path.txt form"),
         ]),
-        OpaqueFunction(function=launch_vehicle, kwargs={'mines': mines is not None}),
+        *([DeclareLaunchArgument('formation', default_value='auto', choices=['auto', 'abreast', '2x2', 'astern'],
+                                 description='abreast: one look over a 13.0 m band; 2x2: two looks over 6.6 m; '
+                                             'astern: four looks over 3.4 m; auto picks by detect_probability')]
+          if search == 'corridor' else []),
+        OpaqueFunction(function=launch_vehicle, kwargs={'mines': mines is not None, 'search': search}),
     ])
