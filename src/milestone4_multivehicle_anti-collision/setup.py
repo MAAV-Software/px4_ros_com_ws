@@ -27,6 +27,7 @@ setup(
         'console_scripts': [
             'offboard_solution = milestone4_multivehicle.offboard_control_solution:main',
             'm4_wait_ready = milestone4_multivehicle.wait_for_px4:main',
+            'mine_field = milestone4_multivehicle.mine_field_node:main',
         ],
     },
 )

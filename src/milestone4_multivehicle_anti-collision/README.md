@@ -45,26 +45,25 @@ two-drone offset pass.
 
 ### Field scan: `scan_launch.py`
 
-A scan of the 80 by 300 ft competition field (24.384 by 91.44 m) in 8 north-south
-rows, two per drone. The camera footprint is taken as 3 m along the drone's nose by
-2 m across it from 5 m up, growing in proportion to height. Every drone holds its
-nose east for the whole flight and flies its rows sideways, so the long side lies
-across the row; from 5.6 m that is 3.36 m, enough for 8 rows 3.0 m apart to cover
-the width with 0.36 m of overlap.
+A scan of the 80 by 300 ft competition field (24.384 by 91.44 m) by three mowing
+drones, with the fourth checking the best path through the mines they find. The
+camera footprint is taken as 3 m along the drone's nose by 2 m across it from 5 m up,
+growing in proportion to height. Every drone holds its nose east for the whole flight
+and flies sideways, so the long side lies across a north-south row; from 5.6 m that
+is 3.36 m, and 9 rows 2.63 m apart cover the width.
 
-| Drone | Rows (m east of the south-west corner) |
-|---|---|
-| 1 | 1.68, 4.68 |
-| 2 | 7.69, 10.69 |
-| 3 | 13.69, 16.70 |
-| 4 | 19.70, 22.70 |
+| Drone | Job | Rows (m east of the south-west corner) |
+|---|---|---|
+| 1 | Mows | 1.68, 4.31, 6.94 |
+| 2 | Mows | 9.56, 12.19, 14.82 |
+| 3 | Mows | 17.45, 20.08, 22.70 |
+| 4 | Checks the best path | none: takes off and waits for the mine survey |
 
-Each drone flies north up its first row, steps east, flies south down its second
-and lands 3 m south of the field, with no yaw at the turns. The four fly the same
-pattern 6 m apart, so ORCA should not need to act; it would if a drone fell a row
-behind its neighbour. Each flies about 192 m, a little over 3.5 minutes at 1 m/s.
-Row ends are 0.62 m inside the field: half the 2.24 m footprint, less the 0.5 m
-at which the controller counts a waypoint as reached and turns.
+Each mower flies north up its first row, south down its second and north up its
+third, with no yaw at the turns, and lands 3 m north of the field. The three fly the
+same pattern 7.9 m apart, about 285 m each, a little over 5 minutes at 1 m/s. Row
+ends are 0.62 m inside the field: half the 2.24 m footprint, less the 0.5 m at which
+the controller counts a waypoint as reached and turns.
 
 On the web launcher pick the **South edge of the field** layout before adding the
 four SITL drones: they wait in a row 3 m south of the field at 1, 9, 17 and 23 m
@@ -74,9 +73,48 @@ by `milestone4_multivehicle/scan_routes.py`; change that and run
 `python3 -m milestone4_multivehicle.scan_routes resource/` rather than editing
 the YAMLs (a test checks they match).
 
-Until run 6 the scan used rows 2 m apart at 5 m with drones facing along the row:
-13 north-south rows split between drones 1-3, and drone 4 sweeping 46 east-west
-rows across them. That took drones 1-3 about 10 minutes and drone 4 about 18.
+Earlier plans: until run 6, rows 2 m apart at 5 m with drones facing along the row
+(13 rows between drones 1-3, drone 4 sweeping east-west across them); in runs 6 and
+7, 8 rows with two per drone and, in run 7, drone 4 re-flying the path after the scan.
+
+### Simulated mines and the checker
+
+`scan_launch.py` hides 150 simulated mines on the field (`mines:=0` turns this off;
+drone 4 then takes off, hears nothing for a minute and lands). Drone 4's launch
+starts one `mine_field` node for the flight; the logic is in
+`milestone4_multivehicle/mines.py`, which needs no ROS.
+
+- **Mines.** The field is the competition's grid of 2 ft squares, 40 columns by 150
+  rows, and a mine fills a square. `mine_seed` (default 10) fixes the layout: two
+  broken walls, six clumps and the rest scattered.
+- **Detection.** Each time a mine comes under a drone's camera footprint it is found
+  with probability `detect_probability` (default 0.9). It gets another chance only
+  when it leaves that footprint and comes back. Finds are logged and published on
+  `/milestone4/mines`.
+- **Best path so far.** Every 3 s the node plans the best path through the squares
+  the mowers have scanned, in the competition's `path.txt` form
+  (https://fexl.com/iarc), with no known mine on the path or in its green zone
+  (0 to 4 squares each side). Until scanned ground reaches the north edge the path
+  stops where it does, on a multiple of 5 rows. A complete path beats a partial
+  one; complete paths are compared by width over length, the competition score.
+  Among equal paths it takes the fewest turns, then the most squares already
+  checked. Complete paths are written to `path_file` (default
+  `/tmp/milestone4_path.txt`).
+- **Checker.** Drone 4 is sent along the stretch of the current path that it has not
+  yet looked at, nose east, high enough for its footprint to span the path and
+  green zone (5.6 to 12 m). When the path changes it flies only the new squares,
+  from whichever end is nearer; with nothing to check it waits where it is. A
+  stretch flown to its end is not tried again, and squares its camera missed are
+  counted in the final log line.
+- **Final.** The path is final when the mowers have finished and every square of it
+  has been checked (or 5 minutes after the scan). Drone 4 then lands 3 m north of
+  the field, between two mowers. A mine it finds on the path on the way reopens it.
+
+The node's score uses the minutes from the first drone leaving the ground to that
+path being planned, and counts the real mines, including ones never found. Things it
+assumes: the green zone is every square within G squares of the path in any
+direction, the path keeps G squares from the east and west edges, and a camera finds
+mines as well from 12 m as from 5.6 m.
 
 ### Anti-collision: `avoidance:=orca` (default) or `avoidance:=priority`
 

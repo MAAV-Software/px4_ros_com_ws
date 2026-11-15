@@ -39,15 +39,15 @@ def test_yaml_passes_the_launch_check(api, drone):
         str(ROOT / f'resource/milestone4_scan_{drone}.yaml'))
 
 
-def test_eight_rows_cover_the_width_with_the_long_side_of_the_footprint():
+def test_nine_rows_cover_the_width_with_the_long_side_of_the_footprint():
     east, north = s.footprint()
     assert (east, north) == pytest.approx((3.36, 2.24))
     rows = s.row_eastings()
-    assert len(rows) == 8 and rows == sorted(rows)
+    assert len(rows) == 9 and rows == sorted(rows)
     assert covered([(e - east / 2, e + east / 2) for e in rows], s.FIELD_EAST_M)
     gaps = [b - a for a, b in zip(rows, rows[1:])]
-    assert max(gaps) - min(gaps) < 0.002 and east - max(gaps) > 0.3  # even, with overlap to spare
-    assert [s.drone_rows(d) for d in range(4)] == [rows[0:2], rows[2:4], rows[4:6], rows[6:8]]
+    assert max(gaps) - min(gaps) < 0.002 and east - max(gaps) > 0.7  # even, with overlap to spare
+    assert [s.drone_rows(d) for d in range(4)] == [rows[0:3], rows[3:6], rows[6:9], []]
 
 
 def test_row_ends_put_the_footprint_past_the_field_edge_when_the_drone_turns():
@@ -58,14 +58,22 @@ def test_row_ends_put_the_footprint_past_the_field_edge_when_the_drone_turns():
     assert (south, north) == pytest.approx((0.62, 90.82))
 
 
-@pytest.mark.parametrize('drone', range(4))
-def test_each_drone_flies_up_one_row_down_the_next_and_lands_south_of_the_field(drone):
+@pytest.mark.parametrize('drone', range(3))
+def test_each_mower_flies_up_down_and_up_its_rows_and_lands_north_of_the_field(drone):
     points = s.waypoints(drone)
-    assert len(points) == 6
-    first, second = s.drone_rows(drone)
+    assert len(points) == 8
+    first, second, third = s.drone_rows(drone)
     south, north = s.row_ends()
     assert [world(drone, p) for p in points] == [pytest.approx(w) for w in (
-        s.SPAWNS[drone], (first, south), (first, north), (second, north), (second, south), (second, -3.))]
+        s.SPAWNS[drone], (first, south), (first, north), (second, north), (second, south),
+        (third, south), (third, north), (third, s.FIELD_NORTH_M + 3.))]
+
+
+def test_the_checker_only_takes_off_and_has_somewhere_clear_to_land():
+    assert s.waypoints(3) == [{'pos': [0., 0., -5.6], 'yaw': pytest.approx(math.pi / 2, abs=1e-3), 'hold_s': 10.}]
+    mowers = [s.world_route(d)[-1] for d in range(3)]
+    for place in s.checker_landings():
+        assert place[1] == s.FIELD_NORTH_M + 3. and all(math.dist(place, m) > 3.5 for m in mowers)
 
 
 @pytest.mark.parametrize('drone', range(4))
@@ -74,16 +82,15 @@ def test_nose_stays_east_at_scan_altitude_with_the_holds(drone):
     assert all(p['yaw'] == pytest.approx(math.pi / 2, abs=1e-3) for p in points)
     assert all(p['pos'][2] == -5.6 for p in points)
     assert points[0]['pos'] == [0., 0., -5.6] and points[0]['hold_s'] == 10.
-    assert all(p['hold_s'] == 0. for p in points[1:-1]) and points[-1]['hold_s'] == 2.
+    assert all(p['hold_s'] == 0. for p in points[1:-1])
+    assert drone == 3 or points[-1]['hold_s'] == 2.
 
 
-def test_drones_on_the_same_leg_are_six_metres_apart_and_land_apart():
-    routes = [[world(d, p) for p in s.waypoints(d)] for d in range(4)]
-    for leg in range(1, 6):
-        assert all(math.dist(routes[d][leg], routes[d + 1][leg]) == pytest.approx(6.007, abs=.01)
-                   for d in range(3))
-    landings = [r[-1] for r in routes]
-    assert all(math.dist(a, b) >= 6 for a, b in itertools.combinations(landings, 2))
+def test_mowers_on_the_same_leg_are_three_rows_apart_and_land_apart():
+    routes = [[world(d, p) for p in s.waypoints(d)] for d in range(3)]
+    for leg in range(1, 8):
+        assert all(math.dist(routes[d][leg], routes[d + 1][leg]) == pytest.approx(7.884, abs=.01)
+                   for d in range(2))
 
 
 def test_spawns_are_south_of_the_field_and_far_enough_apart():
@@ -103,8 +110,9 @@ def test_scan_launch_flies_these_routes_from_these_origins(api):
     assert collision_context  # same context shape as collision_launch
 
 
-def test_orca_fleet_flies_the_whole_scan_on_its_rows_without_contact():
+def test_orca_mowers_fly_the_whole_scan_on_their_rows_without_contact():
     """Kinematic fly-through at 1 m/s with a 0.4 s velocity lag; yaw and climbs ignored.
+    The checker stays over its spawn, as it does with no mine survey.
 
     Run 4 in SITL bowed the rows of an earlier plan by up to 4 m (median 0.7 m off the row),
     from a right bias applied whenever a peer was within 10 m; this simulation reproduced it.
@@ -113,14 +121,14 @@ def test_orca_fleet_flies_the_whole_scan_on_its_rows_without_contact():
     fleet = [OrcaAvoidance(d, *s.SPAWNS[d], vehicle_count=4, max_speed=1.) for d in range(4)]
     local = [[0., 0.] for _ in range(4)]
     vel = [[0., 0.] for _ in range(4)]
-    index, hold_since, done = [1] * 4, [None] * 4, [False] * 4
-    closest, dt, now, cross_track, finished = math.inf, 0.1, 0., [], [None] * 4
+    index, hold_since, done = [1, 1, 1, 0], [None] * 4, [False, False, False, True]
+    closest, dt, now, cross_track, finished = math.inf, 0.1, 0., [], [None] * 3
     while not all(done) and now < 600:
         pos = [position(x=local[d][0], y=local[d][1], vx=vel[d][0], vy=vel[d][1]) for d in range(4)]
         for d in range(4):
             for a in fleet:
                 a.receive(fleet[d].payload(pos[d]), now)
-        for d in range(4):
+        for d in range(3):
             if done[d]:
                 continue
             target = routes[d][index[d]]
@@ -147,8 +155,8 @@ def test_orca_fleet_flies_the_whole_scan_on_its_rows_without_contact():
             closest = min(closest, math.dist(xy[a], xy[b]))
         now += dt
     assert all(done), f'unfinished after {now:.0f} s: waypoints {index}'
-    assert max(finished) < 215  # about 192 m of flying each, after takeoff
-    assert closest >= 5.0  # 6 m in step; less at a corner, where shorter transits put a drone ahead
+    assert max(finished) < 310  # about 285 m of flying each, after takeoff
+    assert closest >= 3.5  # the last row's south end passes the checker's spawn; mowers keep 7.9 m
     cross_track.sort()
     assert cross_track[len(cross_track) // 2] < 0.1
     assert cross_track[int(.9 * len(cross_track))] < 0.3
