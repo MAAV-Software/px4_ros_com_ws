@@ -17,9 +17,11 @@ const CORNER_LABEL: Record<Corner, string> = {
 const EDITABLE = ['idle', 'preflight', 'ready', 'complete'];
 // Blue, green, red, orange and yellow are kept for the path and mines, as in the simulator.
 const QUIET = '#5c5c57';
-const FIELD = '#f6f6f1';
-const LINE = '#d8d8d0';
-const MAJOR = '#b8b8b0';
+const FIELD = '#ffffff';
+// The scorer's grid: every square's edge in light grey, the field's edge in black.
+const LINE = '#cccccc';
+const SCORER_SQUARE_PX = 10;
+const MIN_SQUARE_PX = 6;
 
 function droneNumber(id: string) {
   return /(\d+)$/.exec(id)?.[1] ?? '?';
@@ -54,14 +56,12 @@ function FieldCanvas({ drones, trails }: { drones: Drone[]; trails: Trails['poin
     return () => observer.disconnect();
   }, []);
 
-  // The whole field in view: squares as big as the space allows, at least 3 px.
+  // Every 2 ft square drawn, as the competition scorer does: 10 px squares (5 px per foot) where
+  // the width allows, never under 6 px, so the field is taller than the screen and scrolls.
   const margin = { left: 30, bottom: 18, top: 16, right: 8 };
-  const square = Math.max(
-    3,
-    Math.min(
-      Math.floor((box.width - margin.left - margin.right) / COLUMNS),
-      Math.floor((box.height - margin.top - margin.bottom) / ROWS),
-    ),
+  const square = Math.min(
+    SCORER_SQUARE_PX,
+    Math.max(MIN_SQUARE_PX, Math.floor((box.width - margin.left - margin.right) / COLUMNS)),
   );
   const width = margin.left + COLUMNS * square + margin.right;
   const height = margin.top + ROWS * square + margin.bottom;
@@ -84,32 +84,27 @@ function FieldCanvas({ drones, trails }: { drones: Drone[]; trails: Trails['poin
     context.fillStyle = FIELD;
     context.fillRect(left, top, COLUMNS * square, ROWS * square);
     context.lineWidth = 1;
-    for (let col = 0; col <= COLUMNS; col += 1) {
-      const major = col % 10 === 0;
-      if (!major && square < 6) continue;
-      context.strokeStyle = major ? MAJOR : LINE;
-      context.beginPath();
+    context.strokeStyle = LINE;
+    context.beginPath();
+    for (let col = 1; col < COLUMNS; col += 1) {
       context.moveTo(x(col) + 0.5, top);
       context.lineTo(x(col) + 0.5, top + ROWS * square);
-      context.stroke();
     }
-    for (let row = 0; row <= ROWS; row += 1) {
-      const major = row % 10 === 0;
-      if (!major && square < 6) continue;
-      context.strokeStyle = major ? MAJOR : LINE;
-      context.beginPath();
+    for (let row = 1; row < ROWS; row += 1) {
       context.moveTo(left, y(row) + 0.5);
       context.lineTo(left + COLUMNS * square, y(row) + 0.5);
-      context.stroke();
     }
+    context.stroke();
     context.strokeStyle = INK;
     context.strokeRect(left + 0.5, top + 0.5, COLUMNS * square, ROWS * square);
 
+    // Row numbers every 5 rows, as the scorer labels them.
     context.fillStyle = QUIET;
-    context.font = '11px -apple-system, BlinkMacSystemFont, sans-serif';
+    context.font = '10px -apple-system, BlinkMacSystemFont, sans-serif';
     context.textAlign = 'right';
     context.textBaseline = 'middle';
-    for (const row of [0, 50, 100, 149]) context.fillText(String(row), left - 4, y(row) - square / 2);
+    for (let row = 0; row < ROWS; row += 5) context.fillText(String(row), left - 4, y(row) - square / 2);
+    context.font = '11px -apple-system, BlinkMacSystemFont, sans-serif';
     context.textAlign = 'center';
     context.textBaseline = 'top';
     for (const col of [0, 10, 20, 30, 39]) context.fillText(String(col), x(col) + square / 2, top + ROWS * square + 4);
