@@ -17,6 +17,7 @@ from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
 
+from milestone4_multivehicle.layouts import seed_value
 from milestone4_multivehicle.vehicle import resolve_vehicle
 
 PACKAGE = 'milestone4_multivehicle'
@@ -84,7 +85,7 @@ def launch_vehicle(context, mines=False, search='mow'):
                   for i in range(count) for axis in 'xy'}
         extras.append(Node(
             package=PACKAGE, executable='mine_field', name='mine_field', output='screen',
-            parameters=[{'mine_count': mine_count, 'mine_seed': int(value('mine_seed')),
+            parameters=[{'mine_count': mine_count, 'mine_seed': str(seed_value(value('mine_seed'))),
                          'detect_probability': probability, 'vehicle_count': count,
                          'path_file': value('path_file'), 'search': search,
                          'formation': value('formation') if corridor else 'auto', **spawns}]))
@@ -155,7 +156,9 @@ def fleet_launch_description(route_prefix, origins, mines=None, search='mow'):
                                   description='Simulated mines hidden on the field; 0 for none. The last '
                                               'drone runs them and re-flies the best path'),
             DeclareLaunchArgument('mine_seed', default_value='10',
-                                  description='Seed for where the mines are and which ones a look misses'),
+                                  description='Seed for where the mines are and which ones a look misses: a whole number, '
+                                              "or a layout from the competition's site (layouts.py): norway, 0.1934, "
+                                              '0.2718, ...; those set their own mine count'),
             DeclareLaunchArgument('detect_probability', default_value='0.9',
                                   description="Chance that a mine passing under a drone's camera is found"),
             DeclareLaunchArgument('path_file', default_value='/tmp/milestone4_path.txt',

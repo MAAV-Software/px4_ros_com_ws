@@ -13,6 +13,7 @@ import math
 import os
 
 import rclpy
+from rcl_interfaces.msg import ParameterDescriptor
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import QoSDurabilityPolicy, QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy
@@ -21,6 +22,7 @@ from std_msgs.msg import Float64MultiArray
 
 from milestone4_multivehicle import scan_routes
 from milestone4_multivehicle.corridor import CorridorSearch
+from milestone4_multivehicle.layouts import seed_value
 from milestone4_multivehicle.mines import MineSurvey, place_mines
 
 MINES_TOPIC = '/milestone4/mines'
@@ -32,7 +34,8 @@ class MineField(Node):
     def __init__(self):
         super().__init__('mine_field')
         self.declare_parameter('mine_count', 150)
-        self.declare_parameter('mine_seed', 10)
+        # A whole number, or a stored layout's name (layouts.py), which ROS may read as a number.
+        self.declare_parameter('mine_seed', 10, ParameterDescriptor(dynamic_typing=True))
         self.declare_parameter('detect_probability', 0.9)
         self.declare_parameter('vehicle_count', 4)
         self.declare_parameter('path_file', '/tmp/milestone4_path.txt')
@@ -46,7 +49,7 @@ class MineField(Node):
             self.declare_parameter(f'spawn_y_{i + 1}', north)
             self.origins.append((self.get_parameter(f'spawn_x_{i + 1}').value,
                                  self.get_parameter(f'spawn_y_{i + 1}').value))
-        seed = self.get_parameter('mine_seed').value
+        seed = seed_value(self.get_parameter('mine_seed').value)
         mines = place_mines(self.get_parameter('mine_count').value, seed)
         probability, log = self.get_parameter('detect_probability').value, self.get_logger().info
         self.corridor = self.get_parameter('search').value == 'corridor'

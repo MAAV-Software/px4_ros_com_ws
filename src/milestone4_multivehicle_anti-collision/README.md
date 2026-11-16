@@ -136,13 +136,18 @@ as the scan (`mines`, `mine_seed`, `detect_probability`, `path_file`).
   to its slot at the south edge (drones side by side 3.2 m apart, one behind another
   4 m apart), and sets them off north together once all four are in place, nose east
   at 5.6 m.
-- **Sidestep.** Every 3 s the node checks how far a path with a green zone of 1 gets
-  through the scanned ground. If it stops 10 rows or more behind the rear drone, the
-  band is blocked: every drone moves by the same vector, sideways to the next band
-  beyond everything flown so far and back to 5 rows south of the block, then north
-  again. It steps away from the found mines just past the block, keeps going the
-  same way on later blocks until that side of the field is used up, and stops after
-  8 sidesteps.
+- **Sidestep.** Every 3 s the node checks how far a path gets through the ground
+  scanned so far (ground counts once it has had the formation's full number of looks).
+  If it stops 10 rows or more behind the rear drone, the band is blocked: every drone
+  moves by the same vector, sideways until the band's edge just covers the frontier and
+  back to 5 rows south of it, then north again. The frontier is the nearest square,
+  furthest north, where the path could carry on if unscanned ground turned out clear.
+  A side with no frontier is sealed by mines already found, and is never flown.
+- **Green zone.** A path with a green zone of 1 is looked for first, but only round a
+  block where it is, and for at most 3 sidesteps (a green zone of 1 scores three times
+  a green zone of 0, and a sidestep costs about a third of a minute). After that the
+  formation only moves when a path with no green zone is blocked. It stops after 8
+  sidesteps in all.
 - **Final path.** When the rear drones reach the north end, the node takes the
   complete path with the best expected score: width over length, times the chance
   that no mine is on it, times the expected green-zone penalty. It uses how many
@@ -156,6 +161,60 @@ Not built: re-checking the chosen path afterwards (the research's pick at 0.75 w
 the risk must stay under 5%), and flying higher. Offline over 12 mine layouts the
 formations scored 185 (abreast, 0.99), 112 (2x2, 0.9), 79 (astern, 0.75) and 60
 (astern, 0.5), with a mine on the path in 2, 0, 0 and 4 of the 12.
+
+### Mine layouts: `mine_seed`
+
+`mine_seed` works with both `scan_launch.py` and `corridor_launch.py`.
+
+- **A whole number** (default 10) generates a field of `mines` mines: two broken walls,
+  six clumps and the rest scattered.
+- **`norway`** is the competition site's Norway scenario
+  (<https://fexl.com/iarc/norway>): 150 mines laid out as walls. A wall crosses the
+  whole field at row 50 with two gaps, the west gap leads to a dead end, and the only
+  way through is one square wide, so the best possible green zone is 0.
+- **`0.1934`** is the site's default random pattern of 135 mines, and `0.2718`,
+  `0.3141`, `0.4142`, `0.5772`, `0.618`, `0.7071`, `0.866` and `0.9159` are eight more
+  of its patterns from new seeds. The site generates them on its server, so the
+  squares are copied into `milestone4_multivehicle/layouts.py`.
+
+A stored layout sets its own mine count, whatever `mines` says (other than 0, which
+still means no mines).
+
+```bash
+ros2 launch milestone4_multivehicle corridor_launch.py mine_seed:=norway formation:=2x2
+```
+
+Flown offline (no PX4) with the 2x2 formation at 0.9:
+
+| `mine_seed` | Sidesteps | Decided at | Green zone | Score |
+|---|---|---|---|---|
+| `norway` | 3 | 3.09 min | 0 | 0 (mine on the path) |
+| `0.1934` | 1 | 2.21 min | 1 | 81.8 |
+| `0.2718` | 1 | 2.21 min | 1 | 167.7 |
+| `0.3141` | 3 | 3.19 min | 0 | 41.7 |
+| `0.4142` | 3 | 3.25 min | 0 | 41.8 |
+| `0.5772` | 3 | 3.33 min | 0 | 39.6 |
+| `0.618` | 3 | 3.18 min | 0 | 42.5 |
+| `0.7071` | 2 | 2.70 min | 1 | 129.9 |
+| `0.866` | 1 | 2.32 min | 1 | 158.9 |
+| `0.9159` | 3 | 3.20 min | 0 | 40.8 |
+
+Half the layouts have no way through with a green zone of 1; there the search spends
+its 3 sidesteps looking for one and settles for a green zone of 0.
+
+**Norway is not safe at 0.9 with two looks.** A wall mine missed on both looks reads
+as a gap, and a gap in a wall is a shortcut the planner takes. Over 20 runs that differ
+only in which looks miss, a real mine was on the final path in 3 (and in 1 of 20 with
+the earlier search, which rescanned more ground: 3.8 sidesteps and 3.66 min on average,
+against 2.8 and 3.04 min now). The mean score was about the same, 31.4 against 30.1.
+The SITL flight of this layout hit that case: one sidestep, path decided at 2.45 min
+straight through a twice-missed mine at column 32, row 59, score 0. More looks at the
+chosen path (the re-check that is not built) is what would catch it.
+
+Over the other 21 layouts (the nine above and generated seeds 1 to 12), four miss
+patterns each, the frontier search averaged 1.6 sidesteps and 2.54 min against 2.1 and
+2.73 min before, with the same mean score (105.0 against 105.4) and a mine on the path
+in 5 of 84 runs against 7.
 
 ### Anti-collision: `avoidance:=orca` (default) or `avoidance:=priority`
 

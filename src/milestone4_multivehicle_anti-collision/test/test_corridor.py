@@ -19,7 +19,6 @@ def test_formations_keep_three_metres_and_trade_width_for_looks():
     assert [c.pick_formation(p) for p in (.5, .75, .9, .99)] == ['astern', 'astern', '2x2', 'abreast']
     widths = {name: c.CorridorSearch(set(), formation=name, log=lambda _: None) for name in c.formations()}
     assert [round(widths[n].half_band * 2, 2) for n in ('abreast', '2x2', 'astern')] == [12.96, 6.56, 3.36]
-    assert [round(widths[n].shift, 2) for n in ('abreast', '2x2', 'astern')] == [12.19, 5.49, 2.44]
 
 
 def test_posterior_falls_with_looks_and_the_final_path_prefers_ground_seen_more():
@@ -103,21 +102,22 @@ def test_a_wall_across_the_band_makes_the_formation_sidestep():
     log = []
     search = c.CorridorSearch(wall, 1., 1, formation='2x2', log=log.append)
     for d in range(4):
-        east, north = search.target(d, 50.)
+        east, north = search.target(d, search.start_north)
         search.observe(d, east, north, s.ALTITUDE_M, s.YAW, 0.)
     search.phase = 'transit'
-    for step in range(1, 400):  # glide the formation north past the wall, a look at a time
+    for step in range(1, 600):  # glide the formation north from the south edge, a look at a time
         for d in range(4):
-            east, north = search.target(d, 20. + step * .1)
+            east, north = search.target(d, search.start_north + step * .1)
             search.observe(d, east, north, s.ALTITUDE_M, s.YAW, step * .1)
         if search.phase == 'sidestep':
             break
     assert search.phase == 'sidestep' and search.sidesteps == 1
-    assert abs(search.centre - s.FIELD_EAST_M / 2) == pytest.approx(5.486, abs=.01)
+    # Almost a whole band sideways: the new band just covers the old one's edge.
+    assert 4.8 < abs(search.centre - s.FIELD_EAST_M / 2) < search.half_band * 2
     assert search.restart_north < 60 * m.SQUARE_M
     version, final, points = m.read_message(search.message(0))
     assert len(points) == 2 and not final and points[0][1] < points[1][1]
-    assert any('Band blocked' in line for line in log)
+    assert any('blocked at row' in line for line in log)
 
 
 def test_corridor_launch_offers_formation_and_mines(api):
@@ -126,3 +126,32 @@ def test_corridor_launch_offers_formation_and_mines(api):
                 if type(a).__name__ == 'DeclareLaunchArgument'}
     assert declared['formation'].default_value == 'auto' and declared['mines'].default_value == '150'
     assert declared['path_1'].default_value.args[0][-1] == 'milestone4_corridor_0.yaml'
+
+
+def test_the_frontier_is_where_only_unscanned_ground_stops_the_path():
+    # Columns 10-19 are scanned up to row 30, with a wall across them at row 20.
+    scanned = {(col, row) for col in range(10, 20) for row in range(31)}
+    wall = {(col, 20) for col in range(10, 20)}
+    top, cells = c.frontier(wall, scanned, green=0)
+    assert top == 19
+    # The path could carry on past either edge of the scanned band, or start beside it...
+    assert (9, 19) in cells and (20, 19) in cells and (0, 0) in cells
+    # ...but not through the wall, and nothing north of the wall is in reach.
+    assert not any(row >= 20 for _, row in cells)
+    # Ground about to be scanned opens no frontier.
+    west = {(col, row) for col in range(10) for row in range(m.ROWS)}
+    assert all(col >= 20 for col, _ in c.frontier(wall, scanned, 0, pending=west)[1])
+    # A green zone of 1 needs a square more room on each side.
+    assert c.frontier(wall, scanned, green=1)[0] == 18
+
+
+def test_norway_is_searched_toward_the_frontier():
+    search, log, seconds, closest = fly('2x2', seed='norway')
+    steps = [line for line in log if 'blocked at row' in line]
+    # East to the gap in the wall, then west along the one way out of the maze: never
+    # further east, where nothing leads, and never on to the far west edge.
+    assert len(steps) == search.sidesteps == 3
+    assert ' east ' in steps[0] and all(' west ' in line for line in steps[1:])
+    assert steps[0].startswith('Wide path') and all(line.startswith('Path') for line in steps[1:])
+    assert search.plan is not None and search.plan.green == 0 and search.minutes < 3.3
+    assert closest > 3.0

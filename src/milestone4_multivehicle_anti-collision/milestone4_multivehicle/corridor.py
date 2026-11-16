@@ -9,10 +9,12 @@ every detection probability tried.
   "2x2" two looks over 6.6 m, "astern" four looks over 3.4 m. "auto" picks by how
   reliable a look is.
 - The drones join up at the south edge, then fly north together, nose east. Every few
-  seconds the search checks that a path with a green zone of 1 still gets through the
-  scanned ground. If it stops well short of the rear drone, the band is blocked: every
-  drone moves by the same vector, sideways almost one band and back south to just below
-  the block, and carries on north.
+  seconds the search checks that a path still gets through the scanned ground. If it stops
+  well short of the rear drone, the band is blocked: every drone moves by the same vector,
+  sideways to the frontier (the nearest place the path could carry on through unscanned
+  ground) and back south to just below it, and carries on north. A path with a green zone
+  of 1 is looked for first; once that has no way round, or has cost three sidesteps, the
+  formation only moves for a path with no green zone.
 - When the rear drone reaches the north end the path is chosen: the complete path with the
   best expected score, counting the chance that a square looked at k times still hides a
   mine. The drones then land where they are, north of the field.
@@ -31,11 +33,16 @@ LANE_SOUTH_M = 0.6       # where the front drones start: the first row is under 
 LANE_NORTH_M = 91.2      # where the rear drones finish: the last row is under them within SLOT_M of it
 COLUMN_M = 3.2           # between drones side by side: footprints overlap 0.16 m, drones stay over 3 m apart
 SLOT_M = 0.6             # a drone is in its slot when this close
+RESTART_M = 2.0          # after a sidestep, the formation is back once its rear is this close to the restart
 REPLAN_S = 3.0
 BLOCK_ROWS = 10          # the band is blocked when the path stops this far behind the rear drone
 BACK_ROWS = 5            # after a sidestep, restart this far south of where the path stopped
 NEAR_ROWS = 12           # found mines this far past the block decide which way to sidestep
 MAX_SIDESTEPS = 8
+# A green zone of 1 scores three times a green zone of 0, and a sidestep costs about a third
+# of a minute: after this many, a wider path found later scores no better than a narrow one now.
+MAX_WIDE_SIDESTEPS = 3
+OVERLAP_SQUARES = 1.5    # a band stepped to a frontier square reaches this far past it
 LOOK_STEPS = (1, 2, 3, 4, 6, 8)  # the final path is tried through squares with at least this many looks
 ALL_CELLS = frozenset((c, r) for c in range(COLS) for r in range(ROWS))
 
@@ -51,22 +58,44 @@ def formations(up=s.ALTITUDE_M):
     }
 
 
-def reach_row(blocked, green=1):
-    """The furthest row a path with this green zone can get to from the south edge, or -1."""
+def _open(blocked, green):
+    """A test for squares a path with this green zone may stand on."""
     blocked = set(blocked)
     for _ in range(green):
         blocked = _grow(blocked)
-    free = lambda col, row: green <= col <= COLS - 1 - green and 0 <= row < ROWS and (col, row) not in blocked  # noqa: E731
+    return lambda col, row: green <= col <= COLS - 1 - green and 0 <= row < ROWS and (col, row) not in blocked
+
+
+def flood(blocked, green=1):
+    """Every square a path with this green zone can get to from the south edge."""
+    free = _open(blocked, green)
     stack = [(col, 0) for col in range(COLS) if free(col, 0)]
-    seen, top = set(stack), -1
+    seen = set(stack)
     while stack:
         col, row = stack.pop()
-        top = max(top, row)
         for cell in ((col + 1, row), (col - 1, row), (col, row + 1), (col, row - 1)):
             if cell not in seen and free(*cell):
                 seen.add(cell)
                 stack.append(cell)
-    return top
+    return seen
+
+
+def reach_row(blocked, green=1):
+    """The furthest row a path with this green zone can get to from the south edge, or -1."""
+    return max((row for _, row in flood(blocked, green)), default=-1)
+
+
+def frontier(found, scanned, green=1, pending=()):
+    """(furthest row reached, frontier squares) for a path with this green zone. The frontier
+    is where the path could carry on if unscanned ground turned out clear: squares next to
+    the ones it reaches, or on the south edge, that only unscanned ground keeps it from.
+    `pending` is unscanned ground that is about to be scanned anyway; it opens no frontier."""
+    reached = flood(set(found) | (ALL_CELLS - set(scanned)), green)
+    maybe = _open(set(found) | (set(pending) - set(scanned)), green)
+    edge = {(col, 0) for col in range(COLS)}
+    for col, row in reached:
+        edge.update(((col + 1, row), (col - 1, row), (col, row + 1), (col, row - 1)))
+    return max((row for _, row in reached), default=-1), {cell for cell in edge - reached if maybe(*cell)}
 
 
 def pick_formation(probability):
@@ -126,11 +155,11 @@ class CorridorSearch:
         self.formation = pick_formation(probability) if formation == 'auto' else formation
         self.slots = formations()[self.formation]
         self.rows_back = max(back for _, back in self.slots)
+        # Looks the formation gives each square: the drones that fly each of its columns.
+        self.need = self.count_per_column()
         width = max(e for e, _ in self.slots) - min(e for e, _ in self.slots) + footprint(s.ALTITUDE_M)[0]
         self.half_band = width / 2
-        self.shift = (int(width / SQUARE_M) - 1) * SQUARE_M
         self.centre = s.FIELD_EAST_M / 2
-        self.west, self.east = self.centre, self.centre  # the outermost band centres flown so far
         self.log = log
         self.count = vehicle_count
         self.started_s = None
@@ -141,9 +170,12 @@ class CorridorSearch:
         self.routes = {drone: [] for drone in range(vehicle_count)}
         self.version, self.final = 0, False
         self.planned_s = -math.inf
-        self.sidesteps, self.direction = 0, 0
+        self.sidesteps, self.wide_sidesteps = 0, 0
         self.plan, self.death, self.minutes = None, None, None
         log(f'Corridor search: {self.formation} formation, band {width:.1f} m wide')
+
+    def count_per_column(self):
+        return len(self.slots) // len({east for east, _ in self.slots})
 
     # Where things are
 
@@ -200,10 +232,14 @@ class CorridorSearch:
                 self.phase = 'transit'
                 self.send(LANE_NORTH_M)
         elif self.phase == 'sidestep':
-            # Back in the lanes of the new band, at or below the restart point: checks resume.
+            # Checks resume once the formation has been back to the restart point and is in
+            # the lanes of the new band. The two are noted separately: at speed, or pushed
+            # aside by the anti-collision, the drones may never do both at the same moment.
+            if self.rear_north() <= self.restart_north + RESTART_M:
+                self.restarted = True
             in_lanes = all(abs(self.at[drone][0] - self.target(drone, 0.)[0]) <= SLOT_M
                            for drone in range(self.count))
-            if in_lanes and self.rear_north() <= self.restart_north + 1.0:
+            if self.restarted and in_lanes:
                 self.phase = 'transit'
         elif self.phase == 'transit':
             if self.in_slots(LANE_NORTH_M):
@@ -213,40 +249,63 @@ class CorridorSearch:
                 self._check_block()
 
     def _check_block(self):
+        """Sidestep when the path is blocked behind the formation. A path with a green zone of
+        1 is looked for first, for as long as there is a way round its block right there and
+        MAX_WIDE_SIDESTEPS allows; after that the formation only moves for a path at all."""
         if self.sidesteps >= MAX_SIDESTEPS:
             return
-        blocked = set(self.detector.found) | (ALL_CELLS - set(self.looks))
+        found, rear_row = self.detector.found, min(int(self.rear_north() / SQUARE_M), ROWS - 1)
+        # Ground counts as scanned once it has had the formation's full number of looks:
+        # a mine missed on one look would otherwise read as a gap in a wall.
+        scanned = {cell for cell, looks in self.looks.items() if looks >= self.need}
+        # The band ahead of the rear drones is about to be scanned: no reason to move for it.
+        ahead = {(col, row) for col in range(COLS) for row in range(max(rear_row - 1, 0), ROWS)
+                 if abs((col + 0.5) * SQUARE_M - self.centre) <= self.half_band}
+        for green in (1, 0):
+            top, cells = frontier(found, scanned, green, ahead)
+            if top >= ROWS - 1 or top >= rear_row - BLOCK_ROWS:
+                return  # this path is keeping up with the formation
+            if green:
+                # Only a way round the block where it is. A frontier further back is a
+                # different route altogether, and the narrower path may already be past it.
+                cells = [cell for cell in cells if cell[1] >= top - BACK_ROWS]
+                if self.wide_sidesteps >= MAX_WIDE_SIDESTEPS:
+                    cells = []
+            if cells and self._sidestep(top, cells, green):
+                self.wide_sidesteps += green
+                return
+
+    def _sidestep(self, top, cells, green):
+        """Move the band over the frontier squares furthest north, on the better side."""
+        north = max(row for _, row in cells)
+        cells = [cell for cell in cells if cell[1] >= north - 2]
         near_col = int(self.centre / SQUARE_M)
-        top = reach_row(blocked)
-        rear_row = min(int(self.rear_north() / SQUARE_M), ROWS - 1)
-        if top >= ROWS - 1 or top >= rear_row - BLOCK_ROWS:
-            return
-        # Which way: away from the found mines just past the block, else toward more field.
+        offset = lambda cell: (cell[0] + 0.5) * SQUARE_M - self.centre  # noqa: E731
+        sides = {way: [cell for cell in cells if offset(cell) * way > 0] for way in (1, -1)}
+        if not sides[1] and not sides[-1]:
+            return False  # the frontier is dead ahead
+        # Which way, when both are open: away from the found mines just past the block, else
+        # toward more field.
         ahead = [col for col, row in self.detector.found if top - 2 <= row <= top + NEAR_ROWS]
         west, east = sum(col < near_col for col in ahead), sum(col > near_col for col in ahead)
-        direction = self.direction or (1 if west > east else -1 if east > west
-                                       else 1 if self.centre < s.FIELD_EAST_M / 2 else -1)
-
-        def beyond(way):
-            """The next band on that side of everything flown so far, kept on the field."""
-            centre = (self.east if way > 0 else self.west) + way * self.shift
-            return min(max(centre, self.half_band), s.FIELD_EAST_M - self.half_band)
-
-        if abs(beyond(direction) - (self.east if direction > 0 else self.west)) < SQUARE_M:
-            direction = -direction  # that side is used up
-            if abs(beyond(direction) - (self.east if direction > 0 else self.west)) < SQUARE_M:
-                self.sidesteps = MAX_SIDESTEPS  # the whole width is scanned: carry on in this band
-                return
-        self.direction = direction
+        way = (1 if west > east else -1 if east > west else 1 if self.centre < s.FIELD_EAST_M / 2 else -1)
+        if not sides[way]:
+            way = -way
+        col, row = min(sides[way], key=lambda cell: abs(offset(cell)))
+        # The band's near edge just covers the frontier square; the rest is new ground.
+        centre = (col + 0.5) * SQUARE_M + way * (self.half_band - OVERLAP_SQUARES * SQUARE_M)
+        centre = min(max(centre, self.half_band), s.FIELD_EAST_M - self.half_band)
         self.sidesteps += 1
-        moved = beyond(direction) - self.centre
-        self.centre += moved
-        self.west, self.east = min(self.west, self.centre), max(self.east, self.centre)
-        self.restart_north = max(self.start_north, (top - BACK_ROWS) * SQUARE_M)
-        self.phase = 'sidestep'
+        moved = centre - self.centre
+        self.centre = centre
+        back = max(min(top, row) - BACK_ROWS, 0)
+        self.restart_north = max(self.start_north, back * SQUARE_M)
+        self.phase, self.restarted = 'sidestep', False
         self.send(self.restart_north, LANE_NORTH_M)
-        self.log(f"Band blocked at row {top}: sidestep {self.sidesteps} {abs(moved):.1f} m "
-                 f"{'east' if direction > 0 else 'west'}, restarting from row {max(top - BACK_ROWS, 0)}")
+        self.log(f"{'Wide path' if green else 'Path'} blocked at row {top}: sidestep {self.sidesteps} "
+                 f"{abs(moved):.1f} m {'east' if moved > 0 else 'west'} to the frontier at column {col}, "
+                 f'row {row}, restarting from row {back}')
+        return True
 
     def _decide(self, now_s):
         self.phase = 'done'

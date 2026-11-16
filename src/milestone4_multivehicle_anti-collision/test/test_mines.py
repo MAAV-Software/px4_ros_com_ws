@@ -270,3 +270,29 @@ def test_scan_launch_offers_the_mine_arguments(api):
     assert {'mine_seed', 'detect_probability', 'path_file'} <= declared.keys()
     plain = api('launch/collision_launch.py')
     assert 'mines' not in names(plain.generate_launch_description())
+
+
+def test_stored_layouts_from_the_competition_site():
+    from milestone4_multivehicle import layouts as stored
+    assert len(stored.LAYOUTS['norway']) == 150 and len(stored.SITE_SEEDS) == 9
+    assert all(len(stored.LAYOUTS[name]) == 135 for name in stored.SITE_SEEDS)
+    assert all(0 <= col < m.COLS and 0 <= row < m.ROWS for cells in stored.LAYOUTS.values() for col, row in cells)
+    # A stored layout comes back whole, whatever the count; ROS hands 0.1934 over as a number.
+    assert m.place_mines(10, 'norway') == set(stored.LAYOUTS['norway'])
+    assert m.place_mines(150, 0.1934) == m.place_mines(150, '0.1934') == set(stored.LAYOUTS['0.1934'])
+    assert stored.seed_value('Norway') == 'norway' and stored.seed_value(0.866) == '0.866'
+    # Whole numbers still generate a field, the same one as before.
+    assert stored.seed_value('10') == stored.seed_value(10.0) == 10
+    assert m.place_mines(150, '10') == m.place_mines(150, 10)
+    with pytest.raises(ValueError):
+        stored.seed_value(0.5)
+    with pytest.raises(ValueError):
+        stored.seed_value('sweden')
+
+
+def test_norway_has_one_way_through_one_square_wide():
+    from milestone4_multivehicle import corridor
+    from milestone4_multivehicle import layouts as stored
+    wall = set(stored.LAYOUTS['norway'])
+    assert corridor.reach_row(wall, green=0) == m.ROWS - 1
+    assert corridor.reach_row(wall, green=1) < 70

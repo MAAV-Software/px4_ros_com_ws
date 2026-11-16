@@ -21,6 +21,7 @@ import math
 import random
 
 from milestone4_multivehicle import scan_routes as s
+from milestone4_multivehicle.layouts import LAYOUTS, layout_name
 
 SQUARE_M = 2 * s.FT_M
 COLS, ROWS = 40, 150
@@ -46,9 +47,14 @@ def centre(cell):
 
 
 def place_mines(count=150, seed=10):
-    """A set of `count` (column, row) squares: two broken walls, six clumps, the rest scattered."""
+    """A set of `count` (column, row) squares: two broken walls, six clumps, the rest scattered.
+    A seed that names a stored layout (layouts.py: 'norway', 0.1934, ...) gives that layout
+    whole instead, whatever the count."""
+    name = layout_name(seed)
+    if name:
+        return set(LAYOUTS[name])
     count = max(0, min(int(count), COLS * ROWS))
-    rng = random.Random(seed)
+    rng = random.Random(int(float(seed)))
     mines = set()
 
     def add(col, row):
@@ -93,7 +99,8 @@ class Detector:
     def __init__(self, mines, probability=0.9, seed=10):
         self.mines = sorted(mines)
         self.probability = probability
-        self.rng = random.Random(seed + 1)
+        # A stored layout's name seeds the misses too.
+        self.rng = random.Random(seed + 1 if isinstance(seed, int) else f'{seed}+1')
         self.under = {}      # drone -> mines under its footprint now
         self.found = {}      # mine -> drone that found it first
 
