@@ -22,9 +22,9 @@ from rclpy.qos import QoSDurabilityPolicy, QoSHistoryPolicy, QoSProfile, QoSReli
 from px4_msgs.msg import VehicleLocalPosition
 from std_msgs.msg import Float64MultiArray, String
 
-from milestone4_multivehicle import mine_cases, scan_routes
+from milestone4_multivehicle import mine_cases, scan_results, scan_routes, strategies
 from milestone4_multivehicle.corridor import CorridorSearch
-from milestone4_multivehicle.mines import MineSurvey, map_overlay, plan_path
+from milestone4_multivehicle.mines import COLS, ROWS, MineSurvey, map_overlay, plan_path
 
 MINES_TOPIC = '/milestone4/mines'
 PATH_TOPIC = '/milestone4/best_path'
@@ -41,6 +41,7 @@ class MineField(Node):
         self.declare_parameter('detect_probability', 0.9)
         self.declare_parameter('vehicle_count', 4)
         self.declare_parameter('path_file', '/tmp/milestone4_path.txt')
+        self.declare_parameter('results_file', '~/launcher_runs/scan_results.jsonl')
         self.declare_parameter('search', 'mow')
         self.declare_parameter('formation', 'auto')
         count = self.get_parameter('vehicle_count').value
@@ -51,20 +52,26 @@ class MineField(Node):
             self.declare_parameter(f'spawn_y_{i + 1}', north)
             self.origins.append((self.get_parameter(f'spawn_x_{i + 1}').value,
                                  self.get_parameter(f'spawn_y_{i + 1}').value))
-        seed = self.get_parameter('mine_seed').value
-        case_id = self.get_parameter('mine_case').value
+        seed = self.seed = self.get_parameter('mine_seed').value
+        case_id = self.case_id = self.get_parameter('mine_case').value
         mines = mine_cases.resolve_mines(self.get_parameter('mine_count').value, seed, case_id)
         if case_id:
             self.get_logger().info(f'mine case {case_id!r}: {mine_cases.description(case_id)} '
                                    f'({len(mines)} mines)')
         probability, log = self.get_parameter('detect_probability').value, self.get_logger().info
-        self.corridor = self.get_parameter('search').value == 'corridor'
+        self.search = self.get_parameter('search').value
+        self.corridor = self.search == 'corridor'
         if self.corridor:
             self.survey = CorridorSearch(mines, probability, seed, count,
                                          self.get_parameter('formation').value, log=log)
+        elif self.search in strategies.STRATEGIES:
+            # mow4 / swarm2x2 / quadrant: all drones cover, then the checker re-flies the path.
+            self.survey = MineSurvey(mines, probability, seed, count, log=log,
+                                     **strategies.survey_config(self.search))
         else:
             self.survey = MineSurvey(mines, probability, seed, count, log=log)
         self.written = None
+        self.recorded = False
         self.positions = {}
         px4_qos = QoSProfile(
             reliability=QoSReliabilityPolicy.BEST_EFFORT, durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
@@ -99,6 +106,35 @@ class MineField(Node):
                 self.get_logger().info(f'Mine found at column {col}, row {row} by drone {drone + 1} ({found} so far)')
                 self.mines_pub.publish(Float64MultiArray(data=[float(col), float(row), float(drone), float(found)]))
         self.write_path()
+        self.write_results(now_s)
+
+    def write_results(self, now_s):
+        """Once the best path is final, append this run to results_file so strategies and
+        their path options can be compared later (and shown in the web Results tab)."""
+        survey = self.survey
+        plan, results_file = survey.plan, self.get_parameter('results_file').value
+        if self.recorded or not results_file or not survey.final or plan is None or not plan.complete:
+            return
+        self.recorded = True
+        minutes = (now_s - survey.started_s) / 60 if survey.started_s is not None else 0.0
+        oracle = self.oracle_plan
+        scanned = len(getattr(survey, 'scanned', ()) or ())
+        scan_results.record(results_file, {
+            'strategy': self.search,
+            'mine_case': self.case_id,
+            'mine_seed': self.seed,
+            'mines_total': len(survey.mines),
+            'mines_found': len(survey.detector.found),
+            'scanned_fraction': round(scanned / (COLS * ROWS), 4),
+            'minutes': round(minutes, 3),
+            'width_ft': plan.width_ft,
+            'length_ft': plan.length_ft,
+            'score': round(plan.score(minutes, survey.mines), 3),
+            'oracle_score': round(oracle.score(minutes, survey.mines), 3) if oracle is not None else None,
+            'optimal': bool(oracle is not None and plan.cells == oracle.cells and plan.green == oracle.green),
+            'path_text': plan.text(),
+        })
+        self.get_logger().info(f'recorded {self.search} result to {results_file}')
 
     def write_path(self):
         plan, path_file = self.survey.plan, self.get_parameter('path_file').value

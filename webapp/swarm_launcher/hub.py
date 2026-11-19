@@ -98,8 +98,9 @@ def _respond(result):
     return JSONResponse(result, status_code=200 if result['ok'] else 409)
 
 
-def create_app(core, web_dir=None, background=(), ca_path=None):
-    """`background` holds extra coroutine functions to run for the app's lifetime."""
+def create_app(core, web_dir=None, background=(), ca_path=None, results_path=None):
+    """`background` holds extra coroutine functions to run for the app's lifetime.
+    `results_path` is the milestone4 scan results file the Results tab reads."""
 
     @contextlib.asynccontextmanager
     async def lifespan(app):
@@ -120,6 +121,27 @@ def create_app(core, web_dir=None, background=(), ca_path=None):
     @app.get('/api/state')
     async def get_state():
         return core.snapshot()
+
+    @app.get('/api/scan/results')
+    async def scan_results():
+        """Recorded field-scan runs (milestone4 scan_results.jsonl), newest first, for the
+        Results tab to compare scan strategies and their path options."""
+        rows = []
+        if results_path:
+            try:
+                with open(Path(results_path).expanduser()) as stream:
+                    for line in stream:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            rows.append(json.loads(line))
+                        except json.JSONDecodeError:
+                            continue
+            except OSError:
+                rows = []
+        rows.reverse()
+        return {'results': rows}
 
     @app.post('/api/mission/select')
     async def select(body: SelectCommand):
@@ -196,6 +218,10 @@ def create_app(core, web_dir=None, background=(), ca_path=None):
     @app.post('/api/sitl/stop')
     async def sitl_stop(body: SitlCommand):
         return _respond(core.run_command(body.command_id, core.sitl_stop_all))
+
+    @app.post('/api/sitl/reset')
+    async def sitl_reset(body: SitlCommand):
+        return _respond(core.run_command(body.command_id, core.sitl_reset))
 
     @app.websocket('/ws')
     async def phone_socket(socket: WebSocket, after: int = 0):
@@ -311,6 +337,9 @@ class TaskHandle:
     def kill_group(self):
         self.task.cancel()
 
+    def force_kill(self):
+        self.task.cancel()
+
     def drain_lines(self):
         return []
 
@@ -406,7 +435,8 @@ def main():
         background.append(announce_name)
 
     share = share_dir()
-    app = create_app(core, args.web_dir or share / 'web' / 'dist', background, ca_path)
+    results_path = Path(args.runs_dir).expanduser() / 'scan_results.jsonl'
+    app = create_app(core, args.web_dir or share / 'web' / 'dist', background, ca_path, results_path)
     # Agents and plain-HTTP browsers on one port, phones over HTTPS on another. The app's
     # startup (the hub's tick) runs once, with the first.
     configs.append(uvicorn.Config(app, host=args.host, port=args.port, log_level='warning'))

@@ -69,7 +69,11 @@ class LaunchProcess:
             self._signal_group(signal.SIGKILL)
 
     def group_alive(self):
-        """Whether anything this process started is still running, itself included."""
+        """Whether anything this process started is still running, itself included.
+
+        `killpg(..., 0)` stays true when the only members are zombies (Gazebo's ruby child
+        often ends that way under Docker's `sleep` PID 1), so only non-zombie tasks count.
+        """
         if self.process is None:
             return False
         try:
@@ -78,12 +82,22 @@ class LaunchProcess:
             return False
         except PermissionError:
             return True
-        return True
+        return _process_group_has_live(self.process.pid)
 
     def kill_group(self):
         """For what a stopped process left behind, such as the Gazebo a PX4 instance started."""
         if self.process is not None:
             self._signal_group(signal.SIGKILL)
+
+    def force_kill(self):
+        """SIGKILL the process group and reap the child. Used by SITL Reset sim."""
+        if self.process is None:
+            return
+        if self.stop_requested_at is None:
+            self.stop_requested_at = self.now()
+        self.kill_sent = True
+        self._signal_group(signal.SIGKILL)
+        self.process.poll()
 
     def drain_lines(self):
         lines = []
@@ -96,3 +110,28 @@ class LaunchProcess:
             os.killpg(self.process.pid, signal_number)
         except ProcessLookupError:
             pass
+
+
+def _process_group_has_live(pgid):
+    """True if any non-zombie process is still in this process group."""
+    try:
+        for name in os.listdir('/proc'):
+            if not name.isdigit():
+                continue
+            try:
+                with open(f'/proc/{name}/stat', encoding='utf-8', errors='replace') as stream:
+                    stat = stream.read()
+            except OSError:
+                continue
+            close = stat.rfind(')')
+            if close < 0:
+                continue
+            fields = stat[close + 2:].split()
+            if len(fields) < 3:
+                continue
+            state, group = fields[0], fields[2]
+            if state != 'Z' and group.isdigit() and int(group) == pgid:
+                return True
+    except OSError:
+        return True
+    return False

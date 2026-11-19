@@ -182,6 +182,21 @@ class SitlManager:
                 self._stop(entry)
         self.backend.stop_strays()
 
+    def reset(self):
+        """Tear the sim down immediately: SIGKILL every drone and XRCE, forget stuck
+        leftovers, and stop any recorded strays. Used by Fleet → Reset sim so a hung
+        Stop all or airborne SITL does not need a container restart."""
+        for entry in reversed(self.entries):
+            entry['stopping'] = True
+            entry['stopped_at'] = self.now()
+            entry['agent'].force_kill()
+            entry['px4'].force_kill()
+        self.entries = []
+        if self.xrce is not None:
+            self.xrce.force_kill()
+            self.xrce = None
+        self.backend.stop_strays()
+
     def poll(self):
         """Escalate stops, notice crashes and pass on errors. Returns (source, level, text) lines."""
         lines = []
@@ -387,6 +402,10 @@ class FakeHandle:
 
     def kill_group(self):
         self.alive = False
+
+    def force_kill(self):
+        self.alive = False
+        self.code = 0
 
     def drain_lines(self):
         lines, self.lines = self.lines, []

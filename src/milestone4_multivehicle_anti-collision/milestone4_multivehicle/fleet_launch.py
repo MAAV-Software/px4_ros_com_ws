@@ -17,7 +17,7 @@ from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
 
-from milestone4_multivehicle import mine_cases
+from milestone4_multivehicle import mine_cases, strategies
 from milestone4_multivehicle.vehicle import resolve_vehicle
 
 PACKAGE = 'milestone4_multivehicle'
@@ -72,10 +72,17 @@ def launch_vehicle(context, mines=False, search='mow'):
     mine_count = int(value('mines')) if mines else 0
     if mine_count < 0:
         raise ValueError('mines must be 0 (no mines) or more')
-    surveyor = mine_count > 0 and instance == count - 1
     corridor = search == 'corridor'
+    strategy = strategies.STRATEGIES.get(search)
     if corridor and (mine_count == 0 or count != 4):
         raise ValueError('the corridor search needs mines and four vehicles')
+    if strategy is not None and (mine_count == 0 or count != 4):
+        raise ValueError(f'the {search} scan needs mines and all four vehicles')
+    # Which drone takes the second look along the best path: the checker for the mow and the
+    # named strategies, the last drone otherwise. Corridor has every drone fly its own band.
+    checker_index = strategy.checker if strategy is not None else (None if corridor else count - 1)
+    survey_host = count - 1 if checker_index is None else checker_index
+    surveyor = mine_count > 0 and instance == survey_host
     extras = []
     if surveyor:
         probability = float(value('detect_probability'))
@@ -89,6 +96,7 @@ def launch_vehicle(context, mines=False, search='mow'):
                          'mine_case': value('mine_case'),
                          'detect_probability': probability, 'vehicle_count': count,
                          'path_file': value('path_file'), 'search': search,
+                         'results_file': value('results_file'),
                          'formation': value('formation') if corridor else 'auto', **spawns}]))
 
     params = {
@@ -166,6 +174,9 @@ def fleet_launch_description(route_prefix, origins, mines=None, search='mow'):
                                   description="Chance that a mine passing under a drone's camera is found"),
             DeclareLaunchArgument('path_file', default_value='/tmp/milestone4_path.txt',
                                   description="Where the best path is written, in the competition's path.txt form"),
+            DeclareLaunchArgument('results_file', default_value='~/launcher_runs/scan_results.jsonl',
+                                  description='Where each run appends its scan result, for comparing '
+                                              'path options across strategies; empty to not record'),
         ]),
         *([DeclareLaunchArgument('formation', default_value='auto', choices=['auto', 'abreast', '2x2', 'astern'],
                                  description='abreast: one look over a 13.0 m band; 2x2: two looks over 6.6 m; '

@@ -341,6 +341,33 @@ def test_voice_and_typed_commands_over_http(tmp_path):
         assert stack.state()['voice'] == {'available': True, 'reason': ''}
 
 
+def test_scan_results_are_served_newest_first(tmp_path):
+    results = tmp_path / 'scan_results.jsonl'
+    results.write_text(
+        json.dumps({'strategy': 'mow4', 'score': 10.0}) + '\n'
+        + 'not json, skipped\n'
+        + json.dumps({'strategy': 'quadrant', 'score': 25.0}) + '\n')
+    port = free_port()
+    stack = Stack.__new__(Stack)
+    stack.port, stack.base, stack.core = port, f'http://127.0.0.1:{port}', HubCore()
+    config = uvicorn.Config(create_app(stack.core, results_path=results), host='127.0.0.1',
+                            port=port, log_level='error')
+    stack.server = uvicorn.Server(config)
+    stack.server_thread = threading.Thread(target=stack.server.run, daemon=True)
+    stack.server_thread.start()
+    try:
+        stack.wait_for(lambda s: True, 'the hub')
+        rows = requests.get(f'{stack.base}/api/scan/results', timeout=2).json()['results']
+        assert [row['strategy'] for row in rows] == ['quadrant', 'mow4']  # newest first, bad line skipped
+    finally:
+        stack.stop_hub()
+
+
+def test_scan_results_endpoint_is_empty_without_a_file(tmp_path):
+    with Stack(tmp_path) as stack:
+        assert requests.get(f'{stack.base}/api/scan/results', timeout=2).json() == {'results': []}
+
+
 def test_the_ca_is_offered_for_phones(tmp_path):
     ca = tmp_path / 'ca.crt'
     ca.write_text('-----BEGIN CERTIFICATE-----\n')

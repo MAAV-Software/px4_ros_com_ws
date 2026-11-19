@@ -586,6 +586,42 @@ details > summary {
   background: var(--bad-tint);
 }
 
+.results-wrap {
+  overflow-x: auto;
+}
+
+.results {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.results th,
+.results td {
+  padding: 8px 10px;
+  text-align: left;
+  border-bottom: 1px solid var(--rule);
+  white-space: nowrap;
+}
+
+.results th {
+  font-weight: 700;
+  color: var(--quiet);
+}
+
+.results-best {
+  background: var(--tint);
+}
+
+.results-top {
+  background: var(--good-tint);
+}
+
+.results-badge {
+  color: var(--good);
+  font-weight: 700;
+}
+
 .sheet-backdrop {
   position: fixed;
   inset: 0;

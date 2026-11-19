@@ -187,3 +187,22 @@ export interface CommandResult {
   state: MissionState | null;
   reason: string;
 }
+
+// One recorded field-scan run, from scan_results.record() in scan_results.py, served by the
+// hub at /api/scan/results for the Results tab to compare strategies and their path options.
+export interface ScanResult {
+  time: number;
+  strategy: string;
+  mine_case: string;
+  mine_seed: number;
+  mines_total: number;
+  mines_found: number;
+  scanned_fraction: number;
+  minutes: number;
+  width_ft: number;
+  length_ft: number;
+  score: number | null;
+  oracle_score: number | null;
+  optimal: boolean;
+  path_text: string;
+}

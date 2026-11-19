@@ -305,6 +305,31 @@ class HubCore:
         self.log('hub', 'INFO', 'stopping every SITL drone')
         return self._result(True)
 
+    def sitl_reset(self):
+        """Force-tear down every SITL drone and clear the mission, even mid-flight.
+
+        Stop all refuses airborne drones and can stick on zombie leftovers; Reset sim is
+        the Fleet escape hatch so a new test does not need a container restart.
+        """
+        if self.sitl is None:
+            return self._refused('this hub cannot start SITL drones')
+        if self.mode != 'sitl':
+            return self._refused('switch to SITL to reset SITL drones')
+        if self.state in (PREFLIGHT, READY) or (self.state == STARTING and not self.committed):
+            self._send_all({'type': 'cancel', 'run_id': self.run_id})
+        elif self.state in (STARTING, SEARCHING, LANDING, ABORTING):
+            self._send_all({'type': 'abort'})
+        elif self.state in (COMPLETE, ABORTED):
+            self._send_all({'type': 'reset'})
+        self._clear_run()
+        self._clear_trails()
+        self.mission = None
+        self.checks = {}
+        self._set_state(IDLE)
+        self.sitl.reset()
+        self.log('hub', 'INFO', 'reset every SITL drone')
+        return self._result(True)
+
     def select(self, package, file, drones, args=None):
         """Pick a launch file, the drones to run it and any arguments changed from the
         file's defaults, then run the start checks. Each drone checks the file against its

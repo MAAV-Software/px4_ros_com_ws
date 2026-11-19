@@ -170,7 +170,18 @@ export function FleetTab({ hub, snapshot, offlineS }: { hub: Hub; snapshot: Snap
                 Stop all
               </button>
             )}
+            <button
+              className="button"
+              disabled={!phoneLinked}
+              title="Force-kill every SITL drone and clear the mission, even if one is stuck stopping or still airborne"
+              onClick={() => void run('/api/sitl/reset')}
+            >
+              Reset sim
+            </button>
           </div>
+          <p className="quiet small">
+            Reset sim force-stops PX4 and clears a stuck or mid-flight sim so you can change layout and start again.
+          </p>
         </section>
       )}
       {!sitlMode && live.length > 0 && (

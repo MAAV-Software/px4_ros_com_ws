@@ -677,6 +677,22 @@ def test_a_sitl_drone_in_the_air_or_in_a_run_stays(sitl_core):
     assert sitl_core.sitl_remove('sim1')['ok']
 
 
+def test_sitl_reset_clears_an_airborne_run_and_the_fleet(sitl_core):
+    sitl_core.sitl_add()
+    link = FakeLink()
+    sitl_core.agent_connected('sim1', link)
+    status(sitl_core, 'sim1', sim=True, position_ok=True, airborne=True)
+    sitl_core.mission = {'id': 'm', 'name': 'scan_launch.py', 'drones': ['sim1'],
+                         'package': 'milestone4_multivehicle', 'file': 'scan_launch.py',
+                         'launch': {'package': 'milestone4_multivehicle', 'file': 'scan_launch.py', 'args': {}}}
+    sitl_core.state = SEARCHING
+    sitl_core.run_id = 'run1'
+    assert sitl_core.sitl_reset()['ok']
+    assert sitl_core.state == IDLE and sitl_core.mission is None
+    assert sitl_core.snapshot()['sitl']['drones'] == []
+    assert {'type': 'abort'} in link.sent
+
+
 def test_a_removed_sitl_drone_leaves_the_fleet_once_its_agent_goes(sitl_core):
     sitl_core.sitl_add()
     link = FakeLink()

@@ -4,11 +4,12 @@ import { clockText, MODE_LABEL, STATE_LABEL } from './format';
 import { LogTab } from './LogTab';
 import { MapTab } from './MapTab';
 import { MissionTab } from './MissionTab';
+import { ResultsTab } from './ResultsTab';
 import type { Hub } from './useHub';
 import { useHub, useTicker } from './useHub';
 import type { MissionState } from './types';
 
-const TABS = ['Mission', 'Fleet', 'Map', 'Log'] as const;
+const TABS = ['Mission', 'Fleet', 'Map', 'Results', 'Log'] as const;
 type Tab = (typeof TABS)[number];
 
 const STOPPABLE: MissionState[] = ['preflight', 'ready', 'starting', 'searching', 'landing'];
@@ -137,6 +138,7 @@ export function App() {
           <FleetTab hub={hub} snapshot={snapshot} offlineS={linked ? 0 : sinceReceived / 1000} />
         )}
         {snapshot && tab === 'Map' && <MapTab hub={hub} snapshot={snapshot} />}
+        {tab === 'Results' && <ResultsTab />}
         {tab === 'Log' && <LogTab logs={hub.logs} />}
       </main>
       <AbortBar hub={hub} />

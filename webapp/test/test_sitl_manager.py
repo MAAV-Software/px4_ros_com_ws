@@ -186,6 +186,16 @@ def test_stop_all_stops_every_drone_and_any_strays(manager, backend):
     assert manager.view() == []
 
 
+def test_reset_kills_every_drone_at_once_even_with_leftovers(manager, backend):
+    manager.add()
+    manager.add()
+    manager.entries[0]['px4'] = Leftovers()
+    manager.reset()
+    assert manager.view() == [] and manager.xrce is None
+    assert backend.strays_stopped == 1
+    manager.set_layout('square')  # No longer blocked by stuck stopping entries.
+
+
 @pytest.mark.parametrize('line, level', [
     ('ERROR [uxrce_dds_client] init failed', 'ERROR'),
     ('Traceback (most recent call last):', 'ERROR'),

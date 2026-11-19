@@ -37,6 +37,7 @@ MIN_REACH = 10           # rows a partial path must reach before the checker set
 KEEP_GREEN = 0.9         # keep the current green-zone width unless another is this much better
 ROUTE_END_M = 0.6        # the checker has finished a stretch when this close to its end
 GIVE_UP_S = 300.0        # after the scan, stop checking after this long
+COVERAGE_REACH_M = 1.5   # a cover-then-check drone has finished covering this close to its end
 MOVES = {'U': (0, 1), 'D': (0, -1), 'L': (-1, 0), 'R': (1, 0)}
 
 
@@ -327,11 +328,22 @@ def stretch_route(cells, up):
 class MineSurvey:
     """One flight's mine hunt. Feed it every drone's position about ten times a second."""
 
-    def __init__(self, mines, probability=0.9, seed=10, vehicle_count=4, log=print):
+    def __init__(self, mines, probability=0.9, seed=10, vehicle_count=4, log=print,
+                 mowers=None, checker=None, coverage_ends=None, check_after_coverage=False):
         self.mines = set(mines)
         self.detector = Detector(mines, probability, seed)
-        self.checker = vehicle_count - 1
-        self.mowers = range(vehicle_count - 1)
+        # Classic default: the last drone checks while the others (one fewer) mow their rows.
+        # Cover-then-check: all drones cover the field, then the named checker verifies the path.
+        self.checker = vehicle_count - 1 if checker is None else checker
+        if mowers is not None:
+            self.mowers = list(mowers)
+        elif check_after_coverage:
+            self.mowers = list(range(vehicle_count))
+        else:
+            self.mowers = list(range(vehicle_count - 1))
+        self.check_after_coverage = check_after_coverage
+        self.coverage_ends = dict(coverage_ends or {})
+        self.covered = set()
         self.log = log
         self.started_s = None
         self.rows_flown = {drone: 0 for drone in self.mowers}
@@ -344,6 +356,8 @@ class MineSurvey:
 
     @property
     def scan_over(self):
+        if self.check_after_coverage:
+            return set(self.covered) >= set(self.mowers)
         return all(rows >= s.ROWS_PER_DRONE for rows in self.rows_flown.values())
 
     def observe(self, drone, east, north, up, heading, now_s):
@@ -352,7 +366,10 @@ class MineSurvey:
             self.started_s = now_s
         new = self.detector.observe(drone, east, north, up, heading)
         under = cells_under(east, north, up, heading)
-        if drone == self.checker:
+        # In cover-then-check the checker also mows until coverage is done, so it only takes up
+        # the checking job once scan_over; the classic survey checks from the start.
+        checking = drone == self.checker and (self.scan_over or not self.check_after_coverage)
+        if checking:
             self.checked |= under
             self.checker_at = (east, north)
             if self.final and self.plan and set(new) & self.plan.corridor():
@@ -363,16 +380,33 @@ class MineSurvey:
                 self._think(now_s)
         else:
             self.scanned |= under
-            # Rows alternate: an even one ends at the north edge, an odd one at the south.
-            flown = self.rows_flown[drone]
-            at_end = north > s.FIELD_NORTH_M - ROW_END_M if flown % 2 == 0 else north < ROW_END_M
-            if flown < s.ROWS_PER_DRONE and at_end:
-                self.rows_flown[drone] += 1
-                if self.scan_over:
-                    self.scan_over_s = now_s
-                    self.log(f'Scan complete: {len(self.detector.found)} of {len(self.mines)} mines found, '
-                             f'{len(self.scanned)} of {COLS * ROWS} squares scanned')
+            if self.check_after_coverage:
+                # Coverage is measured by reaching each drone's route end, not by row count,
+                # since quadrant and swarm drones do not fly the field's full height.
+                self._mark_covered(drone, east, north, now_s)
+                self._replan(now_s)
+            else:
+                # Rows alternate: an even one ends at the north edge, an odd one at the south.
+                flown = self.rows_flown[drone]
+                at_end = north > s.FIELD_NORTH_M - ROW_END_M if flown % 2 == 0 else north < ROW_END_M
+                if flown < s.ROWS_PER_DRONE and at_end:
+                    self.rows_flown[drone] += 1
+                    if self.scan_over:
+                        self.scan_over_s = now_s
+                        self.log(f'Scan complete: {len(self.detector.found)} of {len(self.mines)} mines found, '
+                                 f'{len(self.scanned)} of {COLS * ROWS} squares scanned')
         return new
+
+    def _mark_covered(self, drone, east, north, now_s):
+        """Mark a cover-then-check drone done once it reaches the end of its assigned route."""
+        if drone in self.covered or drone not in self.coverage_ends:
+            return
+        if math.dist((east, north), self.coverage_ends[drone]) <= COVERAGE_REACH_M:
+            self.covered.add(drone)
+            if self.scan_over:
+                self.scan_over_s = now_s
+                self.log(f'Scan complete: {len(self.detector.found)} of {len(self.mines)} mines found, '
+                         f'{len(self.scanned)} of {COLS * ROWS} squares scanned')
 
     def _unchecked(self, plan):
         """Indexes of the path squares whose stretch of corridor still has an unchecked square."""
@@ -380,6 +414,22 @@ class MineSurvey:
         return [i for i, (c, r) in enumerate(plan.cells)
                 if any((c + dc, r + dr) not in done for dc in range(-g, g + 1) for dr in range(-g, g + 1)
                        if 0 <= c + dc < COLS and 0 <= r + dr < ROWS)]
+
+    def _replan(self, now_s):
+        """Re-plan the best path through the scanned ground, at most every REPLAN_S.
+        Updates self.plan. Returns False when throttled (so _think can bail early)."""
+        if now_s - self.planned_s < REPLAN_S:
+            return False
+        self.planned_s = now_s
+        near_col = int(self.checker_at[0] / SQUARE_M) if self.checker_at else COLS // 2
+        plan = plan_route(self.detector.found, self.scanned, self.checked | self.skipped,
+                          self.plan.green if self.plan else None, near_col)
+        if plan is not None and (plan.complete or plan.cells[-1][1] >= MIN_REACH) and plan != self.plan:
+            self.plan = plan
+            if now_s - self.logged_s >= 20:
+                self.logged_s = now_s
+                self._report(now_s, 'Path' if plan.complete else 'Path so far')
+        return True
 
     def _think(self, now_s):
         # A stretch flown to its end is done with: squares the camera still missed (a cut
@@ -390,17 +440,8 @@ class MineSurvey:
                              for dc in range(-g, g + 1) for dr in range(-g, g + 1)
                              if 0 <= c + dc < COLS and 0 <= r + dr < ROWS} - self.checked
             self.stretch = []
-        if now_s - self.planned_s < REPLAN_S:
+        if not self._replan(now_s):
             return
-        self.planned_s = now_s
-        near_col = int(self.checker_at[0] / SQUARE_M)
-        plan = plan_route(self.detector.found, self.scanned, self.checked | self.skipped,
-                          self.plan.green if self.plan else None, near_col)
-        if plan is not None and (plan.complete or plan.cells[-1][1] >= MIN_REACH) and plan != self.plan:
-            self.plan = plan
-            if now_s - self.logged_s >= 20:
-                self.logged_s = now_s
-                self._report(now_s, 'Path' if plan.complete else 'Path so far')
         if self.plan is None:
             if self.scan_over:
                 self.log('No path through the scanned ground')
