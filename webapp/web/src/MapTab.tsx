@@ -1,8 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { droneColor, droneName, INK } from './format';
+import { droneColor, droneName, GREEN_ZONE, INK, MINE_FOUND, MINE_HIDDEN, PATH_LINE } from './format';
 import { FreeMap } from './FreeMap';
 import type { Hub } from './useHub';
-import type { Corner, Drone, Snapshot, Trails } from './types';
+import type { Corner, Drone, Snapshot, Survey, Trails } from './types';
 
 const COLUMNS = 40;
 const ROWS = 150;
@@ -41,7 +41,23 @@ export function placeText(drone: Drone) {
   return `Column ${Math.floor(col)}, row ${Math.floor(row)}`;
 }
 
-function FieldCanvas({ drones, trails }: { drones: Drone[]; trails: Trails['points'] }) {
+// The green zone around a path: every square within the Chebyshev radius `green` of a path
+// cell that stays on the field. Matches Plan.corridor() in mines.py.
+function corridorCells(path: [number, number][], green: number) {
+  const zone = new Set<string>();
+  for (const [col, row] of path) {
+    for (let dc = -green; dc <= green; dc += 1) {
+      for (let dr = -green; dr <= green; dr += 1) {
+        const c = col + dc;
+        const r = row + dr;
+        if (c >= 0 && c < COLUMNS && r >= 0 && r < ROWS) zone.add(`${c},${r}`);
+      }
+    }
+  }
+  return zone;
+}
+
+function FieldCanvas({ drones, trails, survey }: { drones: Drone[]; trails: Trails['points']; survey: Survey | null }) {
   const wrapper = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const [box, setBox] = useState({ width: 320, height: 480 });
@@ -111,6 +127,40 @@ function FieldCanvas({ drones, trails }: { drones: Drone[]; trails: Trails['poin
     context.textBaseline = 'bottom';
     context.fillText('N', left + (COLUMNS * square) / 2, top - 2);
 
+    // Milestone 4's survey overlay: the green zone first, then mines over it (mines win over
+    // green, so only blank squares show green), then the chosen path as a black line on top.
+    if (survey) {
+      const mines = new Set(survey.all_mines.map(([c, r]) => `${c},${r}`));
+      const found = new Set(survey.found.map(([c, r]) => `${c},${r}`));
+      const cell = (col: number, row: number) => context.fillRect(x(col), y(row) - square, square, square);
+      if (survey.path.length > 0) {
+        context.fillStyle = GREEN_ZONE;
+        for (const key of corridorCells(survey.path, survey.green)) {
+          if (mines.has(key)) continue; // A mine's square is never painted green.
+          const [c, r] = key.split(',').map(Number);
+          cell(c, r);
+        }
+      }
+      context.fillStyle = MINE_HIDDEN;
+      for (const [c, r] of survey.all_mines) if (!found.has(`${c},${r}`)) cell(c, r);
+      context.fillStyle = MINE_FOUND;
+      for (const [c, r] of survey.found) cell(c, r);
+      if (survey.path.length > 0) {
+        context.strokeStyle = PATH_LINE;
+        context.lineWidth = Math.max(2, square / 4);
+        context.lineJoin = 'round';
+        context.lineCap = 'round';
+        context.beginPath();
+        survey.path.forEach(([c, r], index) => {
+          const px = x(c) + square / 2;
+          const py = y(r) - square / 2;
+          if (index === 0) context.moveTo(px, py);
+          else context.lineTo(px, py);
+        });
+        context.stroke();
+      }
+    }
+
     // Each drone's trail this mission, in its colour, kept inside the field's edge.
     context.save();
     context.beginPath();
@@ -160,7 +210,7 @@ function FieldCanvas({ drones, trails }: { drones: Drone[]; trails: Trails['poin
       context.textBaseline = 'middle';
       context.fillText(droneNumber(drone.id), cx, cy + 0.5);
     }
-  }, [drones, trails, width, height, square]);
+  }, [drones, trails, survey, width, height, square]);
 
   return (
     // At least as tall as the canvas, so nothing after it can overlap the field.
@@ -325,6 +375,45 @@ export function MapTab({ hub, snapshot }: { hub: Hub; snapshot: Snapshot }) {
   );
 }
 
+// The mine/path overlay's legend and, once a full path is planned, whether it is the optimal
+// one the oracle would pick. Shown only while a scan is publishing its survey.
+function SurveyInfo({ survey }: { survey: Survey | null }) {
+  if (!survey) return null;
+  const foundOfAll = `${survey.found.length} of ${survey.all_mines.length} mines found`;
+  const complete = survey.score !== null;
+  const keys: { color: string; label: string }[] = [
+    { color: MINE_HIDDEN, label: 'Hidden mine' },
+    { color: MINE_FOUND, label: 'Found mine' },
+    { color: GREEN_ZONE, label: 'Green zone' },
+    { color: PATH_LINE, label: 'Path' },
+  ];
+  return (
+    <section className="box stack">
+      <h2>Mine survey</h2>
+      <ul className="plain map-legend">
+        {keys.map(({ color, label }) => (
+          <li key={label} className="check">
+            <span className="map-swatch" style={{ background: color }} aria-hidden="true" />
+            <span>{label}</span>
+          </li>
+        ))}
+      </ul>
+      <p className="quiet small">{foundOfAll}.</p>
+      {complete ? (
+        <p className={survey.optimal ? 'banner' : 'banner banner-warn'} role="status">
+          {survey.optimal
+            ? `Optimal path: yes${survey.final ? '' : ' (planning may still refine it)'}`
+            : `Optimal path: no — score ${survey.score!.toFixed(0)} vs the best possible ${
+                survey.oracle_score === null ? '?' : survey.oracle_score.toFixed(0)
+              }`}
+        </p>
+      ) : (
+        <p className="quiet small">Planning the path through the scanned ground…</p>
+      )}
+    </section>
+  );
+}
+
 // The competition's own grid, set by the search area's corners, as the spec describes.
 function CompetitionMap({
   hub,
@@ -376,7 +465,8 @@ function CompetitionMap({
           ))}
           <DroneList drones={drones} withGrid />
           {trailNote}
-          <FieldCanvas drones={drones} trails={hub.trails.points} />
+          <SurveyInfo survey={snapshot.survey} />
+          <FieldCanvas drones={drones} trails={hub.trails.points} survey={snapshot.survey} />
           <div className="row">
             <button className="button" disabled={locked} onClick={() => setEditing(true)}>
               Change corners

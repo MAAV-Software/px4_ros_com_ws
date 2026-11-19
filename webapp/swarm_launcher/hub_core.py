@@ -80,6 +80,9 @@ class HubCore:
         # whenever the trails start again or their grid does, so phones know to redraw.
         self.trails = {}
         self.trail_version = 0
+        # The latest Milestone 4 map overlay (mines, path, green zone), set by survey_bridge
+        # from ROS on the SITL machine. None until a scan publishes one; cleared with trails.
+        self.survey = None
         self.state = IDLE
         self.mission = None
         self.run_id = None
@@ -263,6 +266,18 @@ class HubCore:
         except SitlError as error:
             return self._refused(str(error))
         self.log('hub', 'INFO', f'SITL drones will spawn in the {layout} layout')
+        return self._result(True)
+
+    def sitl_speed(self, factor):
+        if self.sitl is None:
+            return self._refused('this hub cannot start SITL drones')
+        if self.mode != 'sitl':
+            return self._refused('switch to SITL to change the SITL speed')
+        try:
+            self.sitl.set_speed_factor(factor)
+        except SitlError as error:
+            return self._refused(str(error))
+        self.log('hub', 'INFO', f'SITL drones will run at {self.sitl.speed_factor}x realtime')
         return self._result(True)
 
     def sitl_remove(self, drone_id):
@@ -460,6 +475,7 @@ class HubCore:
             'reason': self.reason,
             'mode': self.mode,
             'sitl': self._sitl_snapshot(),
+            'survey': self.survey,
             'area': self.area.view() if self.area else None,
             'https': {'port': self.https_port} if self.https_port else None,
             'local_name': self.local_name,
@@ -518,6 +534,12 @@ class HubCore:
     def _clear_trails(self):
         self.trails = {}
         self.trail_version += 1
+        self.survey = None
+
+    def set_survey(self, survey):
+        """Store the latest Milestone 4 map overlay for the snapshot. `survey` is the decoded
+        /milestone4/map_state dict, or None to clear it. Called by survey_bridge over ROS."""
+        self.survey = survey
 
     def trail_update(self, known_version, known_counts):
         """What a phone hasn't been sent yet: (message or None, version, counts). A phone that
@@ -575,9 +597,11 @@ class HubCore:
 
     def _sitl_snapshot(self):
         if self.sitl is None:
-            return {'available': False, 'drones': [], 'layout': None, 'layouts': []}
+            return {'available': False, 'drones': [], 'layout': None, 'layouts': [],
+                    'speed_factor': None, 'speed_factors': []}
         return {'available': True, 'drones': self._sitl_view(),
-                'layout': self.sitl.layout, 'layouts': self.sitl.layouts()}
+                'layout': self.sitl.layout, 'layouts': self.sitl.layouts(),
+                'speed_factor': self.sitl.speed_factor, 'speed_factors': self.sitl.speed_factors()}
 
     def _sitl_view(self):
         """The SITL manager's list, with each running drone's progress from its own reports."""

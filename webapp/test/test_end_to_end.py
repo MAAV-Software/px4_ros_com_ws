@@ -297,9 +297,12 @@ def test_sitl_drones_from_the_fleet_tab_fly_and_go(tmp_path):
         assert stack.post('/api/sitl/add').json()['reason'] == 'switch to SITL to add SITL drones'
         assert stack.post('/api/mode', mode='sitl').status_code == 200 and saved == ['sitl']
         assert stack.post('/api/sitl/layout', layout='square').status_code == 200
+        assert stack.post('/api/sitl/speed', factor=4).status_code == 200
         assert stack.post('/api/sitl/add').status_code == 200
         assert stack.post('/api/sitl/layout', layout='line').json()['reason'] == \
             'stop every SITL drone before changing the layout'
+        assert stack.post('/api/sitl/speed', factor=2).json()['reason'] == \
+            'stop every SITL drone before changing the speed'
         state = stack.wait_for(lambda s: s['sitl']['drones'] and s['sitl']['drones'][0]['state'] == 'ready',
                                'SITL drone')
         assert [(d['id'], d['sim']) for d in state['drones']] == [('sim1', True)]

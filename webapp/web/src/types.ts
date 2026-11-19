@@ -47,6 +47,12 @@ export interface SitlLayout {
   max: number;
 }
 
+// How much faster than realtime SITL runs, from SitlManager.speed_factors() in sitl_manager.py.
+export interface SitlSpeed {
+  factor: number;
+  label: string;
+}
+
 export type Corner = 'south_west' | 'south_east' | 'north_east' | 'north_west';
 
 export interface LatLon {
@@ -104,6 +110,21 @@ export interface Drone {
   failure: string | null;
 }
 
+// Milestone 4's map overlay, from mines.map_overlay() in mines.py, bridged into the hub
+// snapshot by survey_bridge.py. Columns and rows index the 40 by 150 grid. null until a scan
+// publishes one.
+export interface Survey {
+  all_mines: [number, number][];
+  found: [number, number][];
+  path: [number, number][];
+  green: number;
+  final: boolean;
+  optimal: boolean;
+  score: number | null;
+  oracle_score: number | null;
+  version: number;
+}
+
 export type AbortResult =
   | 'sending'
   | 'no_response'
@@ -118,7 +139,15 @@ export interface Snapshot {
   state: MissionState;
   reason: string;
   mode: Mode;
-  sitl: { available: boolean; drones: SitlDrone[]; layout: string | null; layouts: SitlLayout[] };
+  sitl: {
+    available: boolean;
+    drones: SitlDrone[];
+    layout: string | null;
+    layouts: SitlLayout[];
+    speed_factor: number | null;
+    speed_factors: SitlSpeed[];
+  };
+  survey: Survey | null;
   area: Area | null;
   voice: { available: boolean; reason: string };
   https: { port: number } | null;

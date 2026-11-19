@@ -277,6 +277,26 @@ def plan_path(mines, max_green=MAX_GREEN):
     return plan if plan is not None and plan.complete else None
 
 
+def map_overlay(mines, found, plan, oracle, minutes, final):
+    """The web map's view of a survey, as plain data (no version): every mine, the found
+    ones, the current path and its green zone, and how that path scores against the oracle's
+    optimal `plan_path` one. `plan`/`oracle` are Plans or None."""
+    complete = plan is not None and plan.complete
+    cells = [[c, r] for c, r in plan.cells] if plan is not None else []
+    return {
+        'all_mines': [[c, r] for c, r in sorted(mines)],
+        'found': [[c, r] for c, r in sorted(found)],
+        'path': cells,
+        'green': plan.green if plan is not None else 0,
+        'final': bool(final),
+        # Optimal once a full path exists and its squares and green zone match the oracle's.
+        'optimal': bool(complete and oracle is not None
+                        and plan.cells == oracle.cells and plan.green == oracle.green),
+        'score': plan.score(minutes, mines) if complete else None,
+        'oracle_score': oracle.score(minutes, mines) if oracle is not None else None,
+    }
+
+
 def pass_altitude(plan):
     """Height for checking, nose east: the footprint's east-west side must span the
     corridor on north-south legs, and its north-south side on any east-west leg."""

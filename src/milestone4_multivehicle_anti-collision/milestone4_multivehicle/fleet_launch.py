@@ -17,6 +17,7 @@ from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
 
+from milestone4_multivehicle import mine_cases
 from milestone4_multivehicle.vehicle import resolve_vehicle
 
 PACKAGE = 'milestone4_multivehicle'
@@ -85,6 +86,7 @@ def launch_vehicle(context, mines=False, search='mow'):
         extras.append(Node(
             package=PACKAGE, executable='mine_field', name='mine_field', output='screen',
             parameters=[{'mine_count': mine_count, 'mine_seed': int(value('mine_seed')),
+                         'mine_case': value('mine_case'),
                          'detect_probability': probability, 'vehicle_count': count,
                          'path_file': value('path_file'), 'search': search,
                          'formation': value('formation') if corridor else 'auto', **spawns}]))
@@ -156,6 +158,10 @@ def fleet_launch_description(route_prefix, origins, mines=None, search='mow'):
                                               'drone runs them and re-flies the best path'),
             DeclareLaunchArgument('mine_seed', default_value='10',
                                   description='Seed for where the mines are and which ones a look misses'),
+            DeclareLaunchArgument('mine_case', default_value='', choices=[''] + mine_cases.case_ids(),
+                                  description='A fixed, realistic mine layout to fly instead of the seeded '
+                                              'random one; empty uses mine_seed. mine_seed still sets which '
+                                              'looks miss'),
             DeclareLaunchArgument('detect_probability', default_value='0.9',
                                   description="Chance that a mine passing under a drone's camera is found"),
             DeclareLaunchArgument('path_file', default_value='/tmp/milestone4_path.txt',

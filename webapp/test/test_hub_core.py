@@ -635,7 +635,25 @@ def test_the_sitl_layout_is_picked_before_the_first_drone(sitl_core):
 def test_the_sitl_layout_only_changes_in_sitl(core):
     core.sitl = SitlManager(FakeBackend())
     assert core.sitl_layout('square')['reason'] == 'switch to SITL to change the SITL layout'
-    assert HubCore().snapshot()['sitl'] == {'available': False, 'drones': [], 'layout': None, 'layouts': []}
+    assert HubCore().snapshot()['sitl'] == {'available': False, 'drones': [], 'layout': None, 'layouts': [],
+                                            'speed_factor': None, 'speed_factors': []}
+
+
+def test_the_sitl_speed_is_picked_before_the_first_drone(sitl_core):
+    sitl = sitl_core.snapshot()['sitl']
+    assert sitl['speed_factor'] == 1
+    assert [speed['factor'] for speed in sitl['speed_factors']] == [1, 2, 4, 8]
+    assert sitl_core.sitl_speed(3)['reason'] == 'SITL speed must be one of 1x, 2x, 4x, 8x'
+    assert sitl_core.sitl_speed(4)['ok']
+    assert sitl_core.snapshot()['sitl']['speed_factor'] == 4
+    assert sitl_core.sitl_add()['ok']
+    assert sitl_core.sitl_speed(2)['reason'] == 'stop every SITL drone before changing the speed'
+    assert sitl_core.sitl_speed(4)['ok']  # picking the current one again is harmless
+
+
+def test_the_sitl_speed_only_changes_in_sitl(core):
+    core.sitl = SitlManager(FakeBackend())
+    assert core.sitl_speed(4)['reason'] == 'switch to SITL to change the SITL speed'
 
 
 def test_sitl_drones_can_only_be_added_in_sitl(core):
@@ -807,6 +825,21 @@ def test_trails_last_until_new_mission_and_restart_at_the_next_start(core, links
     assert core.trails == {} and core.trail_version > version
     message, _, _ = core.trail_update(version, {'d1': 1})
     assert message['full'] and message['points'] == {}
+
+
+def test_the_map_overlay_rides_the_snapshot_and_clears_with_the_trails(core, links):
+    assert core.snapshot()['survey'] is None
+    overlay = {'all_mines': [[1, 2]], 'found': [], 'path': [], 'green': 0,
+               'final': False, 'optimal': False, 'score': None, 'oracle_score': None, 'version': 1}
+    core.set_survey(overlay)
+    assert core.snapshot()['survey'] == overlay
+    flying_with_area(core)
+    for _ in range(2):
+        for drone_id in ('d1', 'd2'):
+            status(core, drone_id, run_state='done', run_id=core.run_id, airborne=False, armed=False)
+    assert core.state == COMPLETE
+    core.reset()
+    assert core.snapshot()['survey'] is None
 
 
 def test_drones_not_picked_leave_no_trail(core, links):

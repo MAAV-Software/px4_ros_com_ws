@@ -8,7 +8,10 @@ Publishes:
 - /milestone4/mines: [column, row, drone, found so far] for each mine as it is found.
 - /milestone4/best_path: the checker's next route (mines.MineSurvey.message), twice a second.
 The path itself, in the competition's path.txt form, is logged and written to path_file.
+- /milestone4/map_state: a JSON snapshot for the web map (every mine, the found ones, the
+  current path and its green zone, and how it compares to the oracle), twice a second.
 """
+import json
 import math
 import os
 
@@ -17,14 +20,15 @@ from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import QoSDurabilityPolicy, QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy
 from px4_msgs.msg import VehicleLocalPosition
-from std_msgs.msg import Float64MultiArray
+from std_msgs.msg import Float64MultiArray, String
 
-from milestone4_multivehicle import scan_routes
+from milestone4_multivehicle import mine_cases, scan_routes
 from milestone4_multivehicle.corridor import CorridorSearch
-from milestone4_multivehicle.mines import MineSurvey, place_mines
+from milestone4_multivehicle.mines import MineSurvey, map_overlay, plan_path
 
 MINES_TOPIC = '/milestone4/mines'
 PATH_TOPIC = '/milestone4/best_path'
+MAP_STATE_TOPIC = '/milestone4/map_state'
 ROUTE_TOPIC = '/milestone4/route_{}'  # corridor search: one route topic per drone
 
 
@@ -33,6 +37,7 @@ class MineField(Node):
         super().__init__('mine_field')
         self.declare_parameter('mine_count', 150)
         self.declare_parameter('mine_seed', 10)
+        self.declare_parameter('mine_case', '')
         self.declare_parameter('detect_probability', 0.9)
         self.declare_parameter('vehicle_count', 4)
         self.declare_parameter('path_file', '/tmp/milestone4_path.txt')
@@ -47,7 +52,11 @@ class MineField(Node):
             self.origins.append((self.get_parameter(f'spawn_x_{i + 1}').value,
                                  self.get_parameter(f'spawn_y_{i + 1}').value))
         seed = self.get_parameter('mine_seed').value
-        mines = place_mines(self.get_parameter('mine_count').value, seed)
+        case_id = self.get_parameter('mine_case').value
+        mines = mine_cases.resolve_mines(self.get_parameter('mine_count').value, seed, case_id)
+        if case_id:
+            self.get_logger().info(f'mine case {case_id!r}: {mine_cases.description(case_id)} '
+                                   f'({len(mines)} mines)')
         probability, log = self.get_parameter('detect_probability').value, self.get_logger().info
         self.corridor = self.get_parameter('search').value == 'corridor'
         if self.corridor:
@@ -67,8 +76,12 @@ class MineField(Node):
             for i in range(count)]
         self.mines_pub = self.create_publisher(Float64MultiArray, MINES_TOPIC, 50)
         self.path_pub = self.create_publisher(Float64MultiArray, PATH_TOPIC, 10)
+        self.map_state_pub = self.create_publisher(String, MAP_STATE_TOPIC, 10)
         self.route_pubs = [self.create_publisher(Float64MultiArray, ROUTE_TOPIC.format(i), 10)
                            for i in range(count)] if self.corridor else []
+        # The oracle's best path through the fully-known field: what an optimal scan would find.
+        self.oracle_plan = plan_path(self.survey.mines)
+        self.map_version, self.map_signature = 0, None
         self.get_logger().info(
             f'{len(mines)} mines hidden (seed {seed}); each look finds one with probability '
             f"{self.get_parameter('detect_probability').value:g}")
@@ -104,6 +117,23 @@ class MineField(Node):
                 pub.publish(Float64MultiArray(data=self.survey.message(drone)))
         else:
             self.path_pub.publish(Float64MultiArray(data=self.survey.message()))
+        self.map_state_pub.publish(String(data=json.dumps(self.map_state())))
+
+    def map_state(self):
+        """The web map's overlay (mines.map_overlay), with a version that only bumps when
+        something the map draws has changed, so the hub can skip unchanged snapshots."""
+        survey = self.survey
+        now_s = self.get_clock().now().nanoseconds / 1e9
+        minutes = (now_s - survey.started_s) / 60 if survey.started_s is not None else 0.0
+        state = map_overlay(survey.mines, survey.detector.found, survey.plan,
+                            self.oracle_plan, minutes, survey.final)
+        signature = (tuple(map(tuple, state['found'])), tuple(map(tuple, state['path'])),
+                     state['green'], state['final'], state['optimal'])
+        if signature != self.map_signature:
+            self.map_signature = signature
+            self.map_version += 1
+        state['version'] = self.map_version
+        return state
 
 
 def main():

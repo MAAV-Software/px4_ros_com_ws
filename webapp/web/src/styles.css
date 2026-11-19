@@ -291,6 +291,21 @@ details > summary {
   gap: 4px 16px;
 }
 
+.map-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+}
+
+.map-swatch {
+  flex: none;
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  border: 1px solid rgba(0, 0, 0, 0.2);
+}
+
 .map-dot {
   flex: none;
   display: inline-flex;

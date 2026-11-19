@@ -70,6 +70,10 @@ class LayoutCommand(Command):
     layout: str
 
 
+class SpeedCommand(Command):
+    factor: int
+
+
 class TextCommand(Command):
     text: str
 
@@ -180,6 +184,10 @@ def create_app(core, web_dir=None, background=(), ca_path=None):
     @app.post('/api/sitl/layout')
     async def sitl_layout(body: LayoutCommand):
         return _respond(core.run_command(body.command_id, lambda: core.sitl_layout(body.layout)))
+
+    @app.post('/api/sitl/speed')
+    async def sitl_speed(body: SpeedCommand):
+        return _respond(core.run_command(body.command_id, lambda: core.sitl_speed(body.factor)))
 
     @app.post('/api/sitl/remove')
     async def sitl_remove(body: SitlCommand):
@@ -338,6 +346,7 @@ def main():
     from swarm_launcher.flight_fake import SITL_HOME, FakeFlight
     from swarm_launcher.grid import local_to_global
     from swarm_launcher.launch_library import fake_library
+    from swarm_launcher.survey_bridge import run_survey_bridge
 
     hub_url = f'ws://127.0.0.1:{args.port}/agent'
 
@@ -368,6 +377,12 @@ def main():
             await run_agent(drone_id, flight, fake_library(), hub_url, args.runs_dir, sim=True)
 
         background.append(fake_drone)
+
+    # The Milestone 4 map overlay, if this machine has ROS and a scan is publishing it.
+    async def survey_bridge():
+        await run_survey_bridge(core)
+
+    background.append(survey_bridge)
 
     configs = []
     ca_path = None

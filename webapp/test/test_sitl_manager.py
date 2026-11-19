@@ -71,6 +71,32 @@ def test_the_layout_is_fixed_while_any_drone_is_up(manager):
     assert manager.layout == 'square'
 
 
+def test_the_speed_is_1x_by_default_and_passed_to_each_px4(manager, backend):
+    manager.set_speed_factor(4)
+    manager.add()
+    manager.add()
+    assert backend.speed_factors == [4, 4]
+    assert manager.speed_factor == 4
+
+
+def test_a_bad_speed_is_refused(manager):
+    with pytest.raises(SitlError, match='SITL speed must be one of'):
+        manager.set_speed_factor(3)
+    with pytest.raises(SitlError, match='no SITL speed'):
+        manager.set_speed_factor('fast')
+
+
+def test_the_speed_is_fixed_while_any_drone_is_up(manager):
+    manager.add()
+    with pytest.raises(SitlError, match='stop every SITL drone'):
+        manager.set_speed_factor(2)
+    manager.set_speed_factor(1)  # Setting it to the current value is fine.
+    manager.remove('sim1')
+    manager.poll()
+    manager.set_speed_factor(2)
+    assert manager.speed_factor == 2
+
+
 def test_the_fake_agent_is_told_where_it_spawned(clock):
     seen = []
     backend = FakeBackend(start_agent=lambda *args: seen.append(args) or FakeHandle())
@@ -205,6 +231,13 @@ def test_px4_instances_follow_milestone_2s_sitl_layout(real, tmp_path):
 def test_px4_spawns_where_the_layout_says(real):
     real.start_px4(2, (20, 20))
     assert Recorder.started[0].env['PX4_GZ_MODEL_POSE'] == '20,20,0'
+
+
+def test_px4_gets_the_speed_factor_only_above_realtime(real):
+    real.start_px4(0, (0, 0))
+    assert 'PX4_SIM_SPEED_FACTOR' not in Recorder.started[0].env
+    real.start_px4(1, (20, 0), speed_factor=4)
+    assert Recorder.started[1].env['PX4_SIM_SPEED_FACTOR'] == '4'
 
 
 def test_each_sitl_agent_is_told_who_it_is(real):

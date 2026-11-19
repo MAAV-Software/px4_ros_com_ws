@@ -50,6 +50,13 @@ export const MODE_LABEL = { sitl: 'SITL', hitl: 'HITL' } as const;
 export const DRONE_COLORS = ['#422ade', '#a10354', '#9d850b', '#9c72fe', '#f531ac', '#984b01'];
 export const INK = '#111111';
 
+// Milestone 4's map overlay, matching the simulator: hidden mines pink, found ones red, the
+// planned green zone light green, and the chosen path a black line.
+export const MINE_HIDDEN = '#ff69b4';
+export const MINE_FOUND = '#e11d48';
+export const GREEN_ZONE = '#9be39a';
+export const PATH_LINE = INK;
+
 export function droneColor(slot: number | null | undefined) {
   return slot === null || slot === undefined ? INK : (DRONE_COLORS[slot] ?? INK);
 }

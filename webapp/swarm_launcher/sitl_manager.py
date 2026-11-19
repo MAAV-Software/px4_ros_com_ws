@@ -42,6 +42,11 @@ LAYOUTS = {
               'spawns': [(1, -3), (9, -3), (17, -3), (23, -3)], 'field_sw': (0, 0)},
 }
 DEFAULT_LAYOUT = 'line'
+# Faster-than-realtime SITL, via PX4's PX4_SIM_SPEED_FACTOR (set when each PX4 starts). 1 is
+# realtime. Higher factors shorten the wait but stress the 4-drone sim; drop back if PX4 or
+# Gazebo misbehaves. The factor is fixed while any SITL drone is running, like the layout.
+SPEED_FACTORS = (1, 2, 4, 8)
+DEFAULT_SPEED_FACTOR = 1
 XRCE_PORT = '8888'
 # Milestone 2's SITL limits, except 1 m/s horizontal rather than 2 (since 2026-11-12): at
 # 2 m/s milestone 4's head-on test collided. The HITL runbook still asks real drones for 2.
@@ -95,6 +100,7 @@ class SitlManager:
         self.entries = []
         self.xrce = None
         self.layout = DEFAULT_LAYOUT
+        self.speed_factor = DEFAULT_SPEED_FACTOR
 
     def set_layout(self, layout):
         """Pick where the next world's drones spawn. Fixed while any SITL drone is running."""
@@ -107,6 +113,22 @@ class SitlManager:
     def layouts(self):
         return [{'id': name, 'label': layout['label'], 'max': len(layout['spawns'])}
                 for name, layout in LAYOUTS.items()]
+
+    def set_speed_factor(self, factor):
+        """Pick how much faster than realtime the next world runs. Applied when PX4 starts,
+        so it is fixed while any SITL drone is running."""
+        try:
+            factor = int(factor)
+        except (TypeError, ValueError):
+            raise SitlError(f'no SITL speed {factor!r}')
+        if factor not in SPEED_FACTORS:
+            raise SitlError(f'SITL speed must be one of {", ".join(f"{f}x" for f in SPEED_FACTORS)}')
+        if factor != self.speed_factor and self.entries:
+            raise SitlError('stop every SITL drone before changing the speed')
+        self.speed_factor = factor
+
+    def speed_factors(self):
+        return [{'factor': f, 'label': f'{f}x realtime' if f == 1 else f'{f}x'} for f in SPEED_FACTORS]
 
     def field_offset(self, drone_id):
         """(east, north) metres of this drone's spawn from the field's south-west corner, when
@@ -136,7 +158,7 @@ class SitlManager:
             'instance': instance,
             'drone_id': drone_id,
             'spawn': spawn,
-            'px4': self.backend.start_px4(instance, spawn),
+            'px4': self.backend.start_px4(instance, spawn, self.speed_factor),
             'agent': self.backend.start_agent(instance, drone_id, spawn),
             'started_at': self.now(),
             'stopping': False,
@@ -253,7 +275,7 @@ class ProcessBackend:
     def start_xrce(self):
         return self._start(['MicroXRCEAgent', 'udp4', '-p', XRCE_PORT])
 
-    def start_px4(self, instance, spawn):
+    def start_px4(self, instance, spawn, speed_factor=DEFAULT_SPEED_FACTOR):
         run_dir = self.px4_dir / 'build/px4_sitl_default/rootfs' / str(instance)
         run_dir.mkdir(parents=True, exist_ok=True)
         env = dict(os.environ)
@@ -268,6 +290,10 @@ class ProcessBackend:
             'PX4_UXRCE_DDS_PORT': XRCE_PORT,
             'HEADLESS': '1',
         })
+        # Only set it above realtime: PX4 extends its boot timeout whenever this is present,
+        # so a plain 1x run keeps its usual startup behaviour.
+        if speed_factor and speed_factor != DEFAULT_SPEED_FACTOR:
+            env['PX4_SIM_SPEED_FACTOR'] = str(speed_factor)
         env.update({f'PX4_PARAM_{name}': value for name, value in SITL_PARAMS.items()})
         # -w keeps each instance's parameters and logs in its own folder. The build's etc folder
         # has to be named too: PX4 links it into that folder, and finds no startup script without
@@ -377,6 +403,7 @@ class FakeBackend:
         self.problem_list = list(problems)
         self.started = []
         self.spawns = []
+        self.speed_factors = []
         self.strays_stopped = 0
 
     def problems(self, first):
@@ -386,9 +413,10 @@ class FakeBackend:
         self.started.append('xrce')
         return FakeHandle()
 
-    def start_px4(self, instance, spawn):
+    def start_px4(self, instance, spawn, speed_factor=DEFAULT_SPEED_FACTOR):
         self.started.append(f'px4 {instance}')
         self.spawns.append(tuple(spawn))
+        self.speed_factors.append(speed_factor)
         return FakeHandle()
 
     def start_agent(self, instance, drone_id, spawn):

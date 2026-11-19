@@ -138,6 +138,25 @@ export function FleetTab({ hub, snapshot, offlineS }: { hub: Hub; snapshot: Snap
               <span className="quiet small">Stop all SITL drones to change where they spawn.</span>
             )}
           </label>
+          <label className="field">
+            <span className="field-label small">Simulation speed</span>
+            <select
+              value={sitl.speed_factor ?? 1}
+              disabled={!phoneLinked || sitl.drones.length > 0}
+              onChange={(event) => void run('/api/sitl/speed', { factor: Number(event.target.value) })}
+            >
+              {sitl.speed_factors.map((speed) => (
+                <option key={speed.factor} value={speed.factor}>
+                  {speed.label}
+                </option>
+              ))}
+            </select>
+            {sitl.drones.length > 0 ? (
+              <span className="quiet small">Stop all SITL drones to change the speed.</span>
+            ) : (
+              <span className="quiet small">Faster than realtime cuts the wait, but can unsettle the 4-drone sim.</span>
+            )}
+          </label>
           <div className="row">
             <button
               className="button button-primary"

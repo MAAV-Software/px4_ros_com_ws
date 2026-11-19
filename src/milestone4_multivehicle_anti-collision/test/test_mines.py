@@ -74,6 +74,26 @@ def test_best_path_is_valid_clear_and_no_worse_than_a_narrower_one(seed):
         assert other.green <= green and plan.score(4) >= other.score(4) - 1e-9
 
 
+def test_map_overlay_reports_mines_the_path_and_whether_it_is_optimal():
+    mines = m.place_mines(150, 10)
+    oracle = m.plan_path(mines)
+    found = {cell for cell in list(mines)[:40]}
+    # No path yet: every mine listed, the found ones a subset, nothing optimal.
+    early = m.map_overlay(mines, found, None, oracle, 1.0, final=False)
+    assert len(early['all_mines']) == len(mines) and len(early['found']) == len(found)
+    assert {tuple(c) for c in early['found']} <= {tuple(c) for c in early['all_mines']}
+    assert early['path'] == [] and early['green'] == 0 and not early['optimal']
+    assert early['score'] is None and early['oracle_score'] == pytest.approx(oracle.score(1.0, mines))
+    # The oracle's own path is optimal and scores the same as the oracle.
+    done = m.map_overlay(mines, found, oracle, oracle, 2.0, final=True)
+    assert done['optimal'] and done['final']
+    assert done['path'] == [[c, r] for c, r in oracle.cells] and done['green'] == oracle.green
+    assert done['score'] == pytest.approx(done['oracle_score'])
+    # A different complete path is not optimal.
+    straight = m.Plan([(0, r) for r in range(m.ROWS)], 0)
+    assert not m.map_overlay(mines, found, straight, oracle, 2.0, final=True)['optimal']
+
+
 def test_score_counts_real_mines_on_the_path_and_in_the_green_zone():
     plan = m.Plan([(10, r) for r in range(150)], 2)
     assert plan.score(1, {(10, 40)}) == 0.
@@ -267,6 +287,9 @@ def test_scan_launch_offers_the_mine_arguments(api):
                 if type(a).__name__ == 'DeclareLaunchArgument'}
     declared = names(launch.generate_launch_description())
     assert declared['mines'].default_value == '150'
-    assert {'mine_seed', 'detect_probability', 'path_file'} <= declared.keys()
+    assert {'mine_seed', 'mine_case', 'detect_probability', 'path_file'} <= declared.keys()
+    # mine_case offers the named realistic layouts, and empty for the seeded random field.
+    assert declared['mine_case'].default_value == '' and '' in declared['mine_case'].choices
+    assert 'east_belt' in declared['mine_case'].choices
     plain = api('launch/collision_launch.py')
     assert 'mines' not in names(plain.generate_launch_description())
